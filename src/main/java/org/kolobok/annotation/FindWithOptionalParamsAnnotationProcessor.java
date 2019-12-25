@@ -83,6 +83,20 @@ public class FindWithOptionalParamsAnnotationProcessor extends AbstractProcessor
                         processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR, String.format("Method '%s' in '%' cannot be annotated with @%s because it has default implementation.", method, method.getEnclosingElement(), ANNOTATION_TYPE));
                         hasErrors = true;
                     }
+                    JCTree methodTree = utils.getTree(method);
+                    JCTree.JCMethodDecl methodDecl = (JCTree.JCMethodDecl) methodTree;
+                    processingEnv.getMessager().printMessage(Diagnostic.Kind.NOTE, " return Type = " + methodDecl.getReturnType());
+                    processingEnv.getMessager().printMessage(Diagnostic.Kind.NOTE, " return Type.type = " + methodDecl.getReturnType().type);
+//                    processingEnv.getMessager().printMessage(Diagnostic.Kind.NOTE, " return Type.type = " + methodDecl.getReturnType().type.stringValue());
+
+                    processingEnv.getMessager().printMessage(Diagnostic.Kind.NOTE, " return Type class = " + methodDecl.getReturnType().getClass());
+                    String returnTypeName = String.valueOf(methodDecl.getReturnType().type);
+
+                    if(!returnTypeName.startsWith("java.lang.Iterable") && !returnTypeName.startsWith("org.springframework.data.domain.Page")) {
+                        // ERROR Annotated method should return java.lang.Iterable
+                        processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR, String.format("Method '%s' in '%s' should return either 'org.springframework.data.domain.Page' or java.lang.Iterable<?> but it returns '%s'.", method, method.getEnclosingElement(), returnTypeName));
+                        hasErrors = true;
+                    }
                     methodsToProcess.add(method);
                 }
             }
@@ -176,16 +190,20 @@ public class FindWithOptionalParamsAnnotationProcessor extends AbstractProcessor
         ArrayList<JCTree.JCVariableDecl> newParamsToCall = new ArrayList<>(paramsToCall);
         newParamsToCall.add(params.get(idx));
 
-        if(idx >= params.length() - 1) {
+        if(idx >= parts.length - 1) {
             // Last param in the list - return;
-//            nullSt = maker.Return(maker.Ident(getName(methodPrefix)));
-//            nonNullSt = maker.Return(maker.Ident(getName(methodPrefix + "_And_" + params.get(idx).name)));
             JCTree.JCIdent funcNullName = maker.Ident(getName(methodPrefix.isEmpty() ? "findAll" : methodPrefix));
-            String newMethodName = methodPrefix.isEmpty() ? methodPrefix + parts[idx] : methodPrefix + AND + parts[idx];
-            newMethodName = firstLetterToLowerCase(newMethodName);
+            String newMethodName = methodPrefix.isEmpty() ? firstLetterToLowerCase(parts[idx]) : methodPrefix + AND + parts[idx];
             JCTree.JCIdent funcNonNullName = maker.Ident(getName(newMethodName));
 
-            nullSt = maker.Return(maker.Apply(com.sun.tools.javac.util.List.<JCTree.JCExpression>nil(), funcNullName, com.sun.tools.javac.util.List.<JCTree.JCExpression>from(paramsToCall.stream().map(decl -> maker.Ident(getName("" + decl.getName()))).toArray(n -> new JCTree.JCExpression[n]))));
+            // Add aditional (pageable/sort params)
+            List<JCTree.JCVariableDecl> nullParamsToCall = new ArrayList<>(paramsToCall);
+            for(int j = parts.length; j < params.size(); j++) {
+                nullParamsToCall.add(params.get(j));
+                newParamsToCall.add(params.get(j));
+            }
+
+            nullSt = maker.Return(maker.Apply(com.sun.tools.javac.util.List.<JCTree.JCExpression>nil(), funcNullName, com.sun.tools.javac.util.List.<JCTree.JCExpression>from(nullParamsToCall.stream().map(decl -> maker.Ident(getName("" + decl.getName()))).toArray(n -> new JCTree.JCExpression[n]))));
             List<JCTree.JCIdent> lst = newParamsToCall.stream()
                     .map(decl -> {
                         return maker.Ident(getName("" + decl.getName()));
