@@ -3,18 +3,18 @@ Java Annotation Processor for Spring. It contains a set of annotation that helps
 
 ## @FindWithOptionalParams
 Spring Data Repository interface may to include find methods. Something like 
-```
+```java
 @Repository
 public interface PersonRepo extends PagingAndSortingRepository<Person, Long> {
     Iterable<Person> findByFirstNameAndLastNameAndCityId(String firstName, String lastName, Long cityId);
 }
 ```
 But if you want to find only by `cityId` and `lastName` you need to add new method
-```
+```java
     Iterable<Person> findByLastNameAndCityId(String lastName, Long cityId);
 ```
 This annotation allows to use original `findByFirstNameAndLastNameAndCityId` method with `null` values for params which should not included to search criteria.
-```
+```java
 @Repository
 public interface PersonRepo extends PagingAndSortingRepository<Person, Long> {
     @FindWithOptionalParams
@@ -22,12 +22,12 @@ public interface PersonRepo extends PagingAndSortingRepository<Person, Long> {
 }
 ```
 So now you can use 
-```
+```java
     Iterable<Person> persons = personRepo.findByFirstNameAndLastNameAndCityId(null, "Smith", 1L);
 ```
 ### How it works?
 It generates all possible find methods for search params.
-```
+```java
   Iterable<Person> cityId(Long cityId);
   Iterable<Person> lastName(String lastName);
   Iterable<Person> lastNameAndCityId(String lastName, Long cityId);
@@ -37,7 +37,7 @@ It generates all possible find methods for search params.
   Iterable<Person> firstNameAndLastNameAndCityId(String firstName, String lastName, Long cityId);
 ```
 Also it generates default implementation of `findByFirstNameAndLastNameAndCityId` method that checks which params are null and calls corresponded method. 
-```
+```java
     default Iterable<Person> findByFirstNameAndLastNameAndCityId(String firstName, String lastName, Long cityId) {
       if(firstName == null) {
         if(lastName == null) {
