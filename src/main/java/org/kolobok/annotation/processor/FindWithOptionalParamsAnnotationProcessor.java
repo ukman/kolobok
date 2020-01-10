@@ -1,7 +1,6 @@
-package org.kolobok.annotation;
+package org.kolobok.annotation.processor;
 
 import com.sun.tools.javac.code.Flags;
-import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.TypeTag;
 import com.sun.tools.javac.model.JavacElements;
 import com.sun.tools.javac.processing.JavacProcessingEnvironment;
@@ -38,6 +37,7 @@ public class FindWithOptionalParamsAnnotationProcessor extends AbstractProcessor
     private JavacProcessingEnvironment javacProcessingEnv;
     private TreeMaker maker;
     private Context context;
+    private RepoMethodUtil repoMethodUtil;
 
     @Override
     public void init(ProcessingEnvironment procEnv) {
@@ -45,6 +45,7 @@ public class FindWithOptionalParamsAnnotationProcessor extends AbstractProcessor
         this.javacProcessingEnv = (JavacProcessingEnvironment) procEnv;
         this.maker = TreeMaker.instance(javacProcessingEnv.getContext());
         this.context = ((JavacProcessingEnvironment) processingEnv).getContext();
+        this.repoMethodUtil = new RepoMethodUtil();
     }
 
     /**
@@ -85,11 +86,7 @@ public class FindWithOptionalParamsAnnotationProcessor extends AbstractProcessor
                     }
                     JCTree methodTree = utils.getTree(method);
                     JCTree.JCMethodDecl methodDecl = (JCTree.JCMethodDecl) methodTree;
-                    processingEnv.getMessager().printMessage(Diagnostic.Kind.NOTE, " return Type = " + methodDecl.getReturnType());
-                    processingEnv.getMessager().printMessage(Diagnostic.Kind.NOTE, " return Type.type = " + methodDecl.getReturnType().type);
-//                    processingEnv.getMessager().printMessage(Diagnostic.Kind.NOTE, " return Type.type = " + methodDecl.getReturnType().type.stringValue());
 
-                    processingEnv.getMessager().printMessage(Diagnostic.Kind.NOTE, " return Type class = " + methodDecl.getReturnType().getClass());
                     String returnTypeName = String.valueOf(methodDecl.getReturnType().type);
 
                     if(!returnTypeName.startsWith("java.lang.Iterable") && !returnTypeName.startsWith("org.springframework.data.domain.Page")) {
@@ -113,23 +110,23 @@ public class FindWithOptionalParamsAnnotationProcessor extends AbstractProcessor
                 JCTree.JCMethodDecl methodDecl = (JCTree.JCMethodDecl) methodTree;
                 com.sun.tools.javac.util.List<JCTree.JCVariableDecl> params = methodDecl.params;
 
-                String[] parts = parseFindMethodName(methodDecl.name.toString());
-                JCTree.JCIf ifSt = generateIf(parts, params, 0, "", new ArrayList<>());
+                RepoMethod repoMethod = repoMethodUtil.parseMethodName(methodDecl.name.toString());
+                JCTree.JCIf ifSt = generateIf(repoMethod, params, 0, "", new ArrayList<>());
 
                 com.sun.tools.javac.util.List<JCTree.JCStatement> statements = com.sun.tools.javac.util.List.from(new JCTree.JCStatement[]{ifSt});
 
                 methodDecl.body = maker.Block(0, statements);
                 methodDecl.mods.flags |= Flags.DEFAULT;
 
-                int pow2 = 1 << parts.length;
+                int pow2 = 1 << repoMethod.getParts().length;
                 for(int i = 1; i < pow2; i++) {
                     int roll = i;
                     int idx = 0;
-                    List<String> newParts = new ArrayList<>();
+                    List<RepoMethod.Part> newParts = new ArrayList<>();
                     List<JCTree.JCVariableDecl> newParams = new ArrayList();
                     while(roll != 0) {
                         if((roll & 1) != 0) {
-                            newParts.add(parts[idx]);
+                            newParts.add(repoMethod.getParts()[idx]);
                             JCTree.JCVariableDecl param = params.get(idx);
                             newParams.add(param);
                         }
@@ -137,14 +134,12 @@ public class FindWithOptionalParamsAnnotationProcessor extends AbstractProcessor
                         idx++;
                     }
                     // Adsitional params (Paging/Sorting)
-                    for(int j = parts.length; j < params.length(); j++) {
+                    for(int j = repoMethod.getParts().length; j < params.length(); j++) {
                         newParams.add(params.get(j));
                     }
 
                     com.sun.tools.javac.util.List<JCTree.JCVariableDecl> newParameters = com.sun.tools.javac.util.List.from(newParams);
-                    String newMethodName = newParts.stream().collect(Collectors.joining(AND));
-                    newMethodName = firstLetterToLowerCase(newMethodName);
-                    String paramStr = newParameters.stream().map(p -> p.toString()).collect(Collectors.joining(", "));
+                    String newMethodName = repoMethodUtil.generateMethodName(newParts);
 
                     JCTree.JCMethodDecl newMethodDecl =
                             maker.MethodDef(modifiers, getName(newMethodName), methodDecl.restype, methodDecl.typarams, newParameters, methodDecl.thrown,
@@ -172,33 +167,37 @@ public class FindWithOptionalParamsAnnotationProcessor extends AbstractProcessor
 
     /**
      * Recursively generates if statement for optional params
-     * @param parts parts of method
+     * @param repoMethod repository method descriptor
      * @param params all params of original method
      * @param idx idx starting from which if-statement should be generated
      * @param methodPrefix methodPrefix for previously generated find method
      * @param paramsToCall params for current if-statement
      * @return generated if-statement
      */
-    private JCTree.JCIf generateIf(String[] parts,
+    private JCTree.JCIf generateIf(
+            // String[] parts,
+            RepoMethod repoMethod,
             com.sun.tools.javac.util.List<JCTree.JCVariableDecl> params,
                                    int idx,
                                    String methodPrefix, List<JCTree.JCVariableDecl> paramsToCall) {
-        methodPrefix = firstLetterToLowerCase(methodPrefix);
+        methodPrefix = repoMethodUtil.firstLetterToLowerCase(methodPrefix);
         JCTree.JCLiteral nil = maker.Literal(TypeTag.BOT, null);
         JCTree.JCStatement nullSt, nonNullSt;
 
         ArrayList<JCTree.JCVariableDecl> newParamsToCall = new ArrayList<>(paramsToCall);
         newParamsToCall.add(params.get(idx));
+        RepoMethod.Part part = repoMethod.getParts()[idx];
 
-        if(idx >= parts.length - 1) {
+        if(idx >= repoMethod.getParts().length - 1) {
             // Last param in the list - return;
             JCTree.JCIdent funcNullName = maker.Ident(getName(methodPrefix.isEmpty() ? "findAll" : methodPrefix));
-            String newMethodName = methodPrefix.isEmpty() ? firstLetterToLowerCase(parts[idx]) : methodPrefix + AND + parts[idx];
+            String newMethodName = methodPrefix.isEmpty() ? repoMethodUtil.firstLetterToLowerCase(part.getFullExpression()) : methodPrefix + part.getPreOperation() +
+                    repoMethodUtil.firstLetterToUpperCase(part.getFullExpression());
             JCTree.JCIdent funcNonNullName = maker.Ident(getName(newMethodName));
 
             // Add aditional (pageable/sort params)
             List<JCTree.JCVariableDecl> nullParamsToCall = new ArrayList<>(paramsToCall);
-            for(int j = parts.length; j < params.size(); j++) {
+            for(int j = repoMethod.getParts().length; j < params.size(); j++) {
                 nullParamsToCall.add(params.get(j));
                 newParamsToCall.add(params.get(j));
             }
@@ -214,10 +213,10 @@ public class FindWithOptionalParamsAnnotationProcessor extends AbstractProcessor
             nonNullSt = maker.Return(maker.Apply(com.sun.tools.javac.util.List.<JCTree.JCExpression>nil(), funcNonNullName, newP));
         } else {
             // Add new if
-            nullSt = generateIf(parts, params, idx + 1, methodPrefix, paramsToCall);
-            String newMethodName = methodPrefix.isEmpty() ? methodPrefix + parts[idx] : methodPrefix + AND + parts[idx];
-            newMethodName = firstLetterToLowerCase(newMethodName);
-            nonNullSt = generateIf(parts, params, idx + 1, newMethodName, newParamsToCall);
+            nullSt = generateIf(repoMethod, params, idx + 1, methodPrefix, paramsToCall);
+            String newMethodName = methodPrefix.isEmpty() ? methodPrefix + repoMethodUtil.firstLetterToUpperCase(part.getFullExpression()) : methodPrefix + part.getPreOperation() + repoMethodUtil.firstLetterToUpperCase(part.getFullExpression());
+            newMethodName = repoMethodUtil.firstLetterToLowerCase(newMethodName);
+            nonNullSt = generateIf(repoMethod, params, idx + 1, newMethodName, newParamsToCall);
         }
         JCTree.JCIf res = maker.If(maker.Binary(
                 JCTree.Tag.EQ,
@@ -235,23 +234,5 @@ public class FindWithOptionalParamsAnnotationProcessor extends AbstractProcessor
      */
     private Name getName(String s) {
         return Names.instance(context).fromString(s);
-    }
-
-    private String[] parseFindMethodName(String findMethodName) {
-        if(!findMethodName.startsWith(FIND_BY)) {
-            processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR, String.format("Method '%s' is not started with '%s'", findMethodName, FIND_BY));
-        }
-        String postFix = findMethodName.substring(FIND_BY.length());
-        String[] parts = postFix.split(AND);
-        return parts;
-    }
-
-    /**
-     * Converts first symbol of a string to lower case
-     * @param s string to be converted
-     * @return converted string
-     */
-    private String firstLetterToLowerCase(String s) {
-        return s.length() == 0 ? s : s.substring(0, 1).toLowerCase() + s.substring(1);
     }
 }
