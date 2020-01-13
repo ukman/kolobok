@@ -1,19 +1,19 @@
 # kolobok
-Java Annotation Processor for Spring. It contains a set of annotation that helps working with Spring easier. I am inspired by [Lombok](https://projectlombok.org/).
+Java Annotation Processor for Spring. It contains a set of annotations that makes working with Spring easier. It is inspired by [Lombok](https://projectlombok.org/).
 
 ## @FindWithOptionalParams
-Spring Data Repository interface may to include find methods. Something like 
+Usually Spring Data Repository interface includes find methods. Something like 
 ```java
 @Repository
 public interface PersonRepo extends PagingAndSortingRepository<Person, Long> {
     Iterable<Person> findByFirstNameAndLastNameAndCityId(String firstName, String lastName, Long cityId);
 }
 ```
-But if you want to find only by `cityId` and `lastName` you need to add new method
+But if you want to find only by `cityId` and `lastName` (without specifying `firstName`) you need to add new method
 ```java
     Iterable<Person> findByLastNameAndCityId(String lastName, Long cityId);
 ```
-This annotation allows to use original `findByFirstNameAndLastNameAndCityId` method with `null` values for params which should not included to search criteria.
+`@FindWithOptionalParams` annotation allows you to use original `findByFirstNameAndLastNameAndCityId` method with `null` values for params which should not be used in search criteria.
 ```java
 @Repository
 public interface PersonRepo extends PagingAndSortingRepository<Person, Long> {
@@ -21,7 +21,7 @@ public interface PersonRepo extends PagingAndSortingRepository<Person, Long> {
     Iterable<Person> findByFirstNameAndLastNameAndCityId(String firstName, String lastName, Long cityId);
 }
 ```
-So now you can use 
+So now you can call 
 ```java
     Iterable<Person> persons = personRepo.findByFirstNameAndLastNameAndCityId(null, "Smith", 1L);
 ```
@@ -71,3 +71,18 @@ Also it generates default implementation of `findByFirstNameAndLastNameAndCityId
     }
 
 ```
+### How to use it?
+Just include kolobok library in your project.
+Maven:
+```xml
+  <dependency>
+    <groupId>com.github.ukman.kolobok</groupId>
+    <artifactId>kolobok</artifactId>
+    <version>0.1.1</version>
+  </dependency>
+```
+Gradle:
+```gradle
+compile group: 'com.github.ukman.kolobok', name: 'kolobok', version: '0.1.1'
+```
+And mark find methods with new annotations.
