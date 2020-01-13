@@ -70,7 +70,7 @@ public class RepoMethodUtil {
         StringBuilder sb = new StringBuilder();
         for (RepoMethod.Part newPart : newParts) {
             if(sb.length() > 0) {
-                sb.append(newPart.getPreOperation());
+                sb.append(newPart.getPreOperation() == null ? RepoMethod.Operation.And : newPart.getPreOperation());
                 sb.append(firstLetterToUpperCase(newPart.getFullExpression()));
             } else {
                 sb.append(firstLetterToLowerCase(newPart.getFullExpression()));

@@ -4,14 +4,14 @@
                     http://maven.apache.org/xsd/maven-4.0.0.xsd">
 
   <modelVersion>4.0.0</modelVersion>
-  <groupId>com.github.ukman.kolobok</groupId>
+  <groupId>com.github.ukman</groupId>
   <artifactId>kolobok</artifactId>
-  <version>0.1.1-SNAPSHOT</version>
+  <version>0.1.2</version>
   <packaging>jar</packaging>
   <name>Kolobok</name>
   <url>https://github.com/ukman/kolobok</url>
   <description>
-    Java Annotation Processor for Spring
+    Java Annotation Processor for Spring (see https://github.com/ukman/kolobok for details)
   </description>
   <licenses>
     <license>
@@ -27,6 +27,11 @@
       <email>sergey.grigorchuk@gmail.com</email>
     </developer>
   </developers>
+  <parent>
+    <groupId>org.sonatype.oss</groupId>
+    <artifactId>oss-parent</artifactId>
+    <version>7</version>
+  </parent>
 
   <dependencies>
     <dependency>
@@ -45,31 +50,46 @@
     </dependency>
 
     <!-- Test Dependencies -->
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-test</artifactId>
-      <scope>test</scope>
-      <version>2.1.8.RELEASE</version>
-    </dependency>
-    <dependency>
-      <groupId>com.h2database</groupId>
-      <artifactId>h2</artifactId>
-      <scope>test</scope>
-      <version>1.4.194</version>
-    </dependency>
+    <!--<dependency>-->
+      <!--<groupId>org.springframework.boot</groupId>-->
+      <!--<artifactId>spring-boot-starter-test</artifactId>-->
+      <!--<scope>test</scope>-->
+      <!--<version>2.1.8.RELEASE</version>-->
+    <!--</dependency>-->
+    <!--<dependency>-->
+      <!--<groupId>com.h2database</groupId>-->
+      <!--<artifactId>h2</artifactId>-->
+      <!--<scope>test</scope>-->
+      <!--<version>1.4.194</version>-->
+    <!--</dependency>-->
 
+    <!--<dependency>-->
+      <!--<groupId>org.springframework.boot</groupId>-->
+      <!--<artifactId>spring-boot-starter-data-jpa</artifactId>-->
+      <!--<version>2.1.0.RELEASE</version>-->
+      <!--<scope>test</scope>-->
+    <!--</dependency>-->
+
+    <!--<dependency>-->
+      <!--<groupId>org.projectlombok</groupId>-->
+      <!--<artifactId>lombok</artifactId>-->
+      <!--<version>1.18.10</version>-->
+      <!--<scope>provided</scope>-->
+    <!--</dependency>-->
+
+    <!-- https://mvnrepository.com/artifact/org.assertj/assertj-core -->
     <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-data-jpa</artifactId>
-      <version>2.1.0.RELEASE</version>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <version>3.14.0</version>
       <scope>test</scope>
     </dependency>
-
+    <!-- https://mvnrepository.com/artifact/junit/junit -->
     <dependency>
-      <groupId>org.projectlombok</groupId>
-      <artifactId>lombok</artifactId>
-      <version>1.18.10</version>
-      <scope>provided</scope>
+      <groupId>junit</groupId>
+      <artifactId>junit</artifactId>
+      <version>4.13</version>
+      <scope>test</scope>
     </dependency>
 
   </dependencies>
@@ -85,6 +105,51 @@
           <target>1.8</target>
           <compilerArgument>-proc:none</compilerArgument>
         </configuration>
+      </plugin>
+
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-source-plugin</artifactId>
+        <version>2.2.1</version>
+        <executions>
+          <execution>
+            <id>attach-sources</id>
+            <phase>package</phase>
+            <goals>
+              <goal>jar</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-javadoc-plugin</artifactId>
+        <version>2.9</version>
+        <executions>
+          <execution>
+            <id>attach-javadocs</id>
+            <phase>package</phase>
+            <goals>
+              <goal>jar</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-gpg-plugin</artifactId>
+        <version>1.5</version>
+        <executions>
+          <execution>
+            <id>sign-artifacts</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>sign</goal>
+            </goals>
+          </execution>
+        </executions>
       </plugin>
     </plugins>
   </build>

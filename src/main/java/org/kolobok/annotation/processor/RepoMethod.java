@@ -38,6 +38,10 @@ public class RepoMethod {
             return prefixes[0];
         }
 
+        public String getGeneratedMethodPrefix() {
+            return prefixes[prefixes.length - 1];
+        }
+
         public String[] getPrefixes() {
             return prefixes;
         }
