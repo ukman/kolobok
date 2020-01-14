@@ -79,10 +79,11 @@ Maven:
     <groupId>com.github.ukman</groupId>
     <artifactId>kolobok</artifactId>
     <version>0.1.2</version>
+      <scope>compile</scope>  
   </dependency>
 ```
 Gradle:
 ```gradle
-compile group: 'com.github.ukman', name: 'kolobok', version: '0.1.2'
+compileOnly 'com.github.ukman:kolobok:0.1.2'
 ```
 And mark find methods with new annotations.
