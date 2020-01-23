@@ -108,6 +108,15 @@ public class FindWithOptionalParamsAnnotationProcessor extends AbstractProcessor
                 Element cs = method.getEnclosingElement();
                 JCTree.JCClassDecl classDecl = (JCTree.JCClassDecl) utils.getTree(cs);
 
+                // Scan and add other existing method to signatures list
+                for (JCTree member : classDecl.getMembers()) {
+                    if(member instanceof JCTree.JCMethodDecl) {
+                        JCTree.JCMethodDecl methodDecl = (JCTree.JCMethodDecl) member;
+                        String signature = generateSignature(methodDecl);
+                        existingSignatures.add(signature);
+                    }
+                }
+
                 JCTree methodTree = utils.getTree(method);
                 JCTree.JCMethodDecl methodDecl = (JCTree.JCMethodDecl) methodTree;
                 com.sun.tools.javac.util.List<JCTree.JCVariableDecl> params = methodDecl.params;
