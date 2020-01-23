@@ -76,13 +76,14 @@ Just include kolobok library in your project.
 Maven:
 ```xml
   <dependency>
-    <groupId>com.github.ukman.kolobok</groupId>
+    <groupId>com.github.ukman</groupId>
     <artifactId>kolobok</artifactId>
-    <version>0.1.1</version>
+    <version>0.1.2</version>
+    <scope>compile</scope>  
   </dependency>
 ```
 Gradle:
 ```gradle
-compile group: 'com.github.ukman.kolobok', name: 'kolobok', version: '0.1.1'
+compileOnly 'com.github.ukman:kolobok:0.1.2'
 ```
 And mark find methods with new annotations.
