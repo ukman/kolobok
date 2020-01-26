@@ -6,7 +6,7 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Annotation for marking Number/String fields that should contain information about build number.
+ * Annotation for marking Long/long/Integer/int/String fields that should contain build number.
  * @author Sergey Grigorchuk sergey.grigorchuk@gmail.com
  */
 @Target({ElementType.FIELD})
