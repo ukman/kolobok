@@ -69,21 +69,45 @@ Also it generates default implementation of `findByFirstNameAndLastNameAndCityId
         }
       }
     }
-
 ```
-### How to use it?
+
+## @CompileTime
+
+If you need to 
+know when a class has been compiled, you can use 
+this annotation and mark `long`/`java.lang.Long` fields with this annotation.
+Variable is going to be initialized with value from `System.currentTimeMillis()`.
+
+```java
+@import org.kolobok.annotation.CompileTime;
+
+public class Main {
+    @CompileTime
+    static long ct;
+    
+    public static void main(String args[]) {
+        System.out.println("Class has been compiled at " + new Date(ct));
+    } 
+}
+```
+Output is
+```aidl
+Class has been compiled at Sun Jan 26 12:31:04 MSK 2020
+```
+
+## How to use Kolobok?
 Just include kolobok library in your project.
 Maven:
 ```xml
   <dependency>
     <groupId>com.github.ukman</groupId>
     <artifactId>kolobok</artifactId>
-    <version>0.1.3</version>
+    <version>0.1.4</version>
     <scope>compile</scope>  
   </dependency>
 ```
 Gradle:
 ```gradle
-compileOnly 'com.github.ukman:kolobok:0.1.3'
+compileOnly 'com.github.ukman:kolobok:0.1.4'
 ```
 And mark find methods with new annotations.

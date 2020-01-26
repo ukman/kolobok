@@ -180,7 +180,7 @@ public class FindWithOptionalParamsAnnotationProcessor extends AbstractProcessor
             }
         }
 
-        return false;
+        return hasErrors;
     }
 
     /**

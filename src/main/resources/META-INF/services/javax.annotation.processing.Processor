@@ -1,1 +1,2 @@
 org.kolobok.annotation.processor.FindWithOptionalParamsAnnotationProcessor
+org.kolobok.annotation.processor.CompileTimeAnnotationProcessor
