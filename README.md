@@ -91,8 +91,36 @@ public class Main {
 }
 ```
 Output is
-```aidl
+```
 Class has been compiled at Sun Jan 26 12:31:04 MSK 2020
+```
+
+## @BuildNumber
+You can increment a field in a class every time when somebody compiles
+your application. You need a HTTP service that returns incrementing
+build number by every time when it's being called. You can use 
+[Backendless](https://backendless.com/docs/rest/ut_increment_by_1__return_current.html)
+for this.
+
+```java
+@import org.kolobok.annotation.BuildNumber;
+
+public class Main {
+    @BuildNumber(url = "https://api.backendless.com/${APP_ID}/${API_KEY}/counters/build/increment/get", method = "PUT")
+    static long bn;
+    
+    public static void main(String args[]) {
+        System.out.println("Build number = " + bn);
+    } 
+}
+```
+Output is
+```
+Build number = 1
+```
+After recompilation
+```
+Build number = 2
 ```
 
 ## How to use Kolobok?
@@ -102,12 +130,12 @@ Maven:
   <dependency>
     <groupId>com.github.ukman</groupId>
     <artifactId>kolobok</artifactId>
-    <version>0.1.4</version>
+    <version>0.1.5</version>
     <scope>compile</scope>  
   </dependency>
 ```
 Gradle:
 ```gradle
-compileOnly 'com.github.ukman:kolobok:0.1.4'
+compileOnly 'com.github.ukman:kolobok:0.1.5'
 ```
 And mark find methods with new annotations.
