@@ -79,7 +79,7 @@ this annotation and mark `long`/`java.lang.Long` fields with this annotation.
 Variable is going to be initialized with value from `System.currentTimeMillis()`.
 
 ```java
-@import org.kolobok.annotation.CompileTime;
+import org.kolobok.annotation.CompileTime;
 
 public class Main {
     @CompileTime
