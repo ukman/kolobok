@@ -52,7 +52,6 @@ public class FindWithOptionalParamsAnnotationProcessor extends AbstractProcessor
      */
     @Override
     public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
-
         if ( annotations == null || annotations.isEmpty()) {
             return false;
         }
@@ -65,7 +64,6 @@ public class FindWithOptionalParamsAnnotationProcessor extends AbstractProcessor
 
         // Check methods marked with annotation
         for (TypeElement annotation : annotations) {
-
             if (ANNOTATION_TYPE.equals(annotation.asType().toString())){
                 // Find all annotated methods
                 final Set<? extends Element> methods = roundEnv.getElementsAnnotatedWith(annotation);
@@ -112,7 +110,7 @@ public class FindWithOptionalParamsAnnotationProcessor extends AbstractProcessor
                 for (JCTree member : classDecl.getMembers()) {
                     if(member instanceof JCTree.JCMethodDecl) {
                         JCTree.JCMethodDecl methodDecl = (JCTree.JCMethodDecl) member;
-                        String signature = generateSignature(methodDecl);
+                        String signature = generateSignature(classDecl, methodDecl);
                         existingSignatures.add(signature);
                     }
                 }
@@ -171,7 +169,7 @@ public class FindWithOptionalParamsAnnotationProcessor extends AbstractProcessor
                     JCTree.JCMethodDecl newMethodDecl =
                             maker.MethodDef(modifiers, getName(newMethodName), methodDecl.restype, methodDecl.typarams, newParameters, methodDecl.thrown,
                                     null, null);
-                    String signature = generateSignature(newMethodDecl);
+                    String signature = generateSignature(classDecl, newMethodDecl);
                     if(!existingSignatures.contains(signature)) {
                         existingSignatures.add(signature);
                         classDecl.defs = classDecl.defs.append(newMethodDecl);
@@ -185,11 +183,13 @@ public class FindWithOptionalParamsAnnotationProcessor extends AbstractProcessor
 
     /**
      * Generates signature of a method to be checked if such method already has been generated
+     *
+     * @param classDecl declaration of class which contains method for signature
      * @param method method for which signature should be generated
      * @return signature string
      */
-    private String generateSignature(JCTree.JCMethodDecl method) {
-        return method.name + "(" +
+    private String generateSignature(JCTree.JCClassDecl classDecl, JCTree.JCMethodDecl method) {
+        return classDecl.name + " " + method.name + "(" +
                 method.params.stream().map(p -> p.getType().toString())
                 .collect(Collectors.joining(",")) +
                 ")";

@@ -6,7 +6,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.github.ukman</groupId>
   <artifactId>kolobok</artifactId>
-  <version>0.1.5</version>
+  <version>0.1.6</version>
   <packaging>jar</packaging>
   <name>Kolobok</name>
   <url>https://github.com/ukman/kolobok</url>

@@ -21,8 +21,8 @@ public @interface BuildNumber {
     String url();
 
     /**
-     * Method that should be used to get build number via HTTP protocol.
-     * @return
+     * HTTP Method that should be used to get build number via HTTP protocol.
+     * @return HTTP method name (GET|POST|PUT)
      */
     String method() default "POST";
 
