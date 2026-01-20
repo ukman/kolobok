@@ -124,3 +124,4 @@ And mark find methods with new annotations.
 
 The Maven sample includes a REST API (`/persons`) with a `/persons/search` endpoint and Swagger UI at `http://localhost:8080/swagger-ui.html`. It also ships with `data.sql` seed data.
 The Gradle sample mirrors the Maven sample and works with the Gradle plugin as well.
+Email me : sergey.grigorchuk@gmail.com
