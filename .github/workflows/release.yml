@@ -20,6 +20,12 @@ jobs:
           java-version: '21'
           gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
           gpg-passphrase: ${{ secrets.GPG_PASSPHRASE }}
+          cache: 'maven'
+
+      - name: Verify Java and Maven
+        run: |
+          java -version
+          mvn -version
 
       - name: Configure Maven settings
         run: |
