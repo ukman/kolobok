@@ -24,13 +24,13 @@ jobs:
       - name: Configure Maven settings
         run: |
           mkdir -p ~/.m2
-          cat > ~/.m2/settings.xml <<'SETTINGS'
+          cat > ~/.m2/settings.xml <<SETTINGS
           <settings>
             <servers>
               <server>
                 <id>central</id>
-                <username>${env.CENTRAL_TOKEN_ID}</username>
-                <password>${env.CENTRAL_TOKEN_SECRET}</password>
+                <username>${CENTRAL_TOKEN_ID}</username>
+                <password>${CENTRAL_TOKEN_SECRET}</password>
               </server>
             </servers>
           </settings>
