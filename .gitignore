@@ -1,3 +1,24 @@
-.idea
-kolobok.iml
-target
+# Maven
+/target/
+**/target/
+
+# Gradle
+.gradle/
+build/
+**/build/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+# OS
+.DS_Store
+
+# Logs
+*.log
+
+# Tooling
+.gradle-bin/

@@ -1,0 +1,10 @@
+INSERT INTO person (id, first_name, last_name, title) VALUES (1, 'John', 'Smith', 'Mr');
+INSERT INTO person (id, first_name, last_name, title) VALUES (2, 'Jane', 'Smith', 'Ms');
+INSERT INTO person (id, first_name, last_name, title) VALUES (3, 'John', 'Doe', 'Mr');
+INSERT INTO person (id, first_name, last_name, title) VALUES (4, 'Alice', 'Doe', 'Ms');
+INSERT INTO person (id, first_name, last_name, title) VALUES (5, 'Bob', 'Stone', 'Mr');
+INSERT INTO person (id, first_name, last_name, title) VALUES (6, 'John', 'Stone', 'Mr');
+INSERT INTO person (id, first_name, last_name, title) VALUES (7, 'Alice', 'Smith', 'Ms');
+INSERT INTO person (id, first_name, last_name, title) VALUES (8, 'Bob', 'Doe', 'Mr');
+INSERT INTO person (id, first_name, last_name, title) VALUES (9, 'Carol', 'Smith', 'Ms');
+INSERT INTO person (id, first_name, last_name, title) VALUES (10, 'Carol', 'Stone', 'Ms');
