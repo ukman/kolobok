@@ -22,3 +22,7 @@ build/
 
 # Tooling
 .gradle-bin/
+
+# Private notes
+PUBLISHING_PRIVATE.md
+token.xml

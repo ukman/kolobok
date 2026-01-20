@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Configure Maven settings
+        run: |
+          mkdir -p ~/.m2
+          cat > ~/.m2/settings.xml <<'SETTINGS'
+          <settings>
+            <servers>
+              <server>
+                <id>central</id>
+                <username>${env.CENTRAL_TOKEN_ID}</username>
+                <password>${env.CENTRAL_TOKEN_SECRET}</password>
+              </server>
+            </servers>
+          </settings>
+          SETTINGS
+        env:
+          CENTRAL_TOKEN_ID: ${{ secrets.CENTRAL_TOKEN_ID }}
+          CENTRAL_TOKEN_SECRET: ${{ secrets.CENTRAL_TOKEN_SECRET }}
+
+      - name: Publish to Maven Central
+        env:
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: mvn -Prelease deploy
