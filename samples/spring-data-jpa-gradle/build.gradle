@@ -4,7 +4,7 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath 'com.github.ukman:kolobok-gradle-plugin:0.2.0'
+        classpath 'com.github.ukman:kolobok-gradle-plugin:0.2.3'
     }
 }
 
@@ -25,8 +25,8 @@ group = 'com.example'
 version = '0.0.1-SNAPSHOT'
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
 }
 
 dependencies {
@@ -34,7 +34,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springdoc:springdoc-openapi-ui:1.7.0'
     runtimeOnly 'com.h2database:h2'
-    compileOnly 'com.github.ukman:kolobok:0.2.0'
+    compileOnly 'com.github.ukman:kolobok:0.2.3'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 }
 

@@ -26,3 +26,8 @@ build/
 # Private notes
 PUBLISHING_PRIVATE.md
 token.xml
+
+# Local run scripts
+samples/spring-data-jpa-maven/run-java*.sh
+samples/spring-data-jpa-gradle/run-java*.sh
+compile2.sh

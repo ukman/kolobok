@@ -54,25 +54,27 @@ public class FindWithOptionalParamsIntegrationTest {
     }
 
     private void writeSources(Path srcDir) throws IOException {
-        String person = """
-                package sample;
-
-                public class Person {
-                    private Long id;
-                    private String name;
-                }
-                """;
-        String repository = """
-                package sample;
-
-                import org.kolobok.annotation.FindWithOptionalParams;
-                import java.lang.Iterable;
-
-                public interface PersonRepository {
-                    @FindWithOptionalParams
-                    Iterable<Person> findByIdAndName(Long id, String name);
-                }
-                """;
+        String person = String.join("\n",
+                "package sample;",
+                "",
+                "public class Person {",
+                "    private Long id;",
+                "    private String name;",
+                "}",
+                ""
+        );
+        String repository = String.join("\n",
+                "package sample;",
+                "",
+                "import org.kolobok.annotation.FindWithOptionalParams;",
+                "import java.lang.Iterable;",
+                "",
+                "public interface PersonRepository {",
+                "    @FindWithOptionalParams",
+                "    Iterable<Person> findByIdAndName(Long id, String name);",
+                "}",
+                ""
+        );
 
         Files.writeString(srcDir.resolve("sample/Person.java"), person);
         Files.writeString(srcDir.resolve("sample/PersonRepository.java"), repository);

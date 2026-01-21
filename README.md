@@ -72,14 +72,14 @@ Also it generates default implementation of `findByFirstNameAndLastNameAndCityId
 ```
 
 ## How to use Kolobok?
-Kolobok uses a bytecode transformer after compilation, so no special compiler flags are needed. Java 21 is the target runtime for the transformer.
+Kolobok uses a bytecode transformer after compilation, so no special compiler flags are needed. It works on Java 11 and newer (verified on 11, 17, 21, 25).
 
 Maven:
 ```xml
   <dependency>
     <groupId>com.github.ukman</groupId>
     <artifactId>kolobok</artifactId>
-    <version>0.2.0</version>
+    <version>0.2.3</version>
     <scope>provided</scope>
   </dependency>
 
@@ -88,7 +88,7 @@ Maven:
       <plugin>
         <groupId>com.github.ukman</groupId>
         <artifactId>kolobok-maven-plugin</artifactId>
-        <version>0.2.0</version>
+        <version>0.2.3</version>
         <executions>
           <execution>
             <goals>
@@ -104,12 +104,12 @@ Maven:
 Gradle:
 ```gradle
 dependencies {
-    compileOnly 'com.github.ukman:kolobok:0.2.0'
+    compileOnly 'com.github.ukman:kolobok:0.2.3'
 }
 
 buildscript {
     dependencies {
-        classpath 'com.github.ukman:kolobok-gradle-plugin:0.2.0'
+        classpath 'com.github.ukman:kolobok-gradle-plugin:0.2.3'
     }
 }
 

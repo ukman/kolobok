@@ -16,7 +16,7 @@
   <name>Kolobok Sample Maven</name>
 
   <properties>
-    <java.version>21</java.version>
+    <java.version>11</java.version>
   </properties>
 
   <dependencies>
@@ -43,7 +43,7 @@
     <dependency>
       <groupId>com.github.ukman</groupId>
       <artifactId>kolobok</artifactId>
-      <version>0.2.0</version>
+      <version>0.2.3</version>
       <scope>provided</scope>
     </dependency>
     <dependency>
@@ -63,7 +63,7 @@
       <plugin>
         <groupId>com.github.ukman</groupId>
         <artifactId>kolobok-maven-plugin</artifactId>
-        <version>0.2.0</version>
+        <version>0.2.3</version>
         <executions>
           <execution>
             <goals>
