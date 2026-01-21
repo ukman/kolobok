@@ -2,6 +2,7 @@
 
 ## Highlights
 - Verified Java 11+ compatibility (tested on 11, 17, 21, 25) and adjusted build targets.
+- Added `@LogContext` instrumentation that logs method entry/exit/exception timing using existing SLF4J logger fields.
 - Updated samples and example dependencies to 0.2.3.
 
 ## Compatibility

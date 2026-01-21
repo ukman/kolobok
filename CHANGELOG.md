@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## 0.2.3
 - Verified support for Java 11+ (tested on 11, 17, 21, 25) and updated build targets accordingly.
+- Added `@LogContext` annotation with bytecode instrumentation for method entry/exit/exception logging using existing SLF4J logger fields.
 - Updated sample and example dependencies to 0.2.3.
 
 ## 0.2.0

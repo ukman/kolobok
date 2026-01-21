@@ -6,9 +6,22 @@ import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.commons.GeneratorAdapter;
 import org.objectweb.asm.commons.Method;
+import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldNode;
+import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.IntInsnNode;
+import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.InsnNode;
+import org.objectweb.asm.tree.JumpInsnNode;
+import org.objectweb.asm.tree.LabelNode;
+import org.objectweb.asm.tree.LdcInsnNode;
+import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.TryCatchBlockNode;
+import org.objectweb.asm.tree.TypeInsnNode;
+import org.objectweb.asm.tree.VarInsnNode;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -22,6 +35,9 @@ import java.util.stream.Stream;
 
 public class KolobokTransformer {
     public static final String OPTIONAL_PARAMS_DESC = "Lorg/kolobok/annotation/FindWithOptionalParams;";
+    public static final String LOG_CONTEXT_DESC = "Lorg/kolobok/annotation/LogContext;";
+    private static final String SLF4J_LOGGER_DESC = "Lorg/slf4j/Logger;";
+    private static final String[] LOGGER_FIELD_NAMES = {"log", "logger", "LOG", "LOGGER"};
 
     private final RepoMethodUtil repoMethodUtil = new RepoMethodUtil();
 
@@ -45,11 +61,12 @@ public class KolobokTransformer {
         ClassNode classNode = new ClassNode();
         reader.accept(classNode, ClassReader.EXPAND_FRAMES);
 
-        if ((classNode.access & Opcodes.ACC_INTERFACE) == 0) {
-            return;
+        boolean modified;
+        if ((classNode.access & Opcodes.ACC_INTERFACE) != 0) {
+            modified = transformInterface(classNode);
+        } else {
+            modified = transformLogContext(classNode);
         }
-
-        boolean modified = transformInterface(classNode);
         if (!modified) {
             return;
         }
@@ -95,6 +112,338 @@ public class KolobokTransformer {
         }
 
         return true;
+    }
+
+    private boolean transformLogContext(ClassNode classNode) {
+        boolean classAnnotated = hasAnnotation(classNode.visibleAnnotations, LOG_CONTEXT_DESC)
+                || hasAnnotation(classNode.invisibleAnnotations, LOG_CONTEXT_DESC);
+
+        List<MethodNode> methodsToInstrument = new ArrayList<>();
+        for (MethodNode method : classNode.methods) {
+            if (shouldInstrumentMethod(method, classAnnotated)) {
+                methodsToInstrument.add(method);
+            }
+        }
+
+        if (methodsToInstrument.isEmpty()) {
+            return false;
+        }
+
+        FieldNode loggerField = findLoggerField(classNode);
+        if (loggerField == null) {
+            throw new IllegalStateException("Class '" + classNode.name
+                    + "' uses @LogContext but no static logger field named log/logger/LOG/LOGGER with type org.slf4j.Logger was found");
+        }
+
+        for (MethodNode method : methodsToInstrument) {
+            instrumentLogContextMethod(classNode, method, loggerField);
+        }
+
+        return true;
+    }
+
+    private boolean shouldInstrumentMethod(MethodNode method, boolean classAnnotated) {
+        if ((method.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0) {
+            return false;
+        }
+        if (method.name.equals("<init>") || method.name.equals("<clinit>")) {
+            return false;
+        }
+        if (method.instructions == null || method.instructions.size() == 0) {
+            return false;
+        }
+        return classAnnotated || hasAnnotation(method, LOG_CONTEXT_DESC);
+    }
+
+    private FieldNode findLoggerField(ClassNode classNode) {
+        for (FieldNode field : classNode.fields) {
+            if ((field.access & Opcodes.ACC_STATIC) == 0) {
+                continue;
+            }
+            if (!SLF4J_LOGGER_DESC.equals(field.desc)) {
+                continue;
+            }
+            for (String name : LOGGER_FIELD_NAMES) {
+                if (name.equals(field.name)) {
+                    return field;
+                }
+            }
+        }
+        return null;
+    }
+
+    private void instrumentLogContextMethod(ClassNode classNode, MethodNode method, FieldNode loggerField) {
+        boolean isStatic = (method.access & Opcodes.ACC_STATIC) != 0;
+        Type[] argTypes = Type.getArgumentTypes(method.desc);
+        Type returnType = Type.getReturnType(method.desc);
+        int[] argIndexes = computeArgIndexes(isStatic, argTypes);
+
+        int startTimeVar = method.maxLocals;
+        method.maxLocals += 2;
+
+        int returnVar = -1;
+        if (returnType.getSort() != Type.VOID) {
+            returnVar = method.maxLocals;
+            method.maxLocals += returnType.getSize();
+        }
+
+        int durationVar = method.maxLocals;
+        method.maxLocals += 2;
+
+        int exceptionVar = method.maxLocals;
+        method.maxLocals += 1;
+
+        LabelNode startLabel = new LabelNode();
+        LabelNode endLabel = new LabelNode();
+        LabelNode handlerLabel = new LabelNode();
+
+        InsnList entry = new InsnList();
+        entry.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/System", "nanoTime", "()J", false));
+        entry.add(new VarInsnNode(Opcodes.LSTORE, startTimeVar));
+        append(entry, buildEntryLog(classNode, method, loggerField, argTypes, argIndexes));
+        entry.add(startLabel);
+        method.instructions.insert(entry);
+
+        List<AbstractInsnNode> returns = new ArrayList<>();
+        for (AbstractInsnNode insn = method.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            int opcode = insn.getOpcode();
+            if (opcode >= Opcodes.IRETURN && opcode <= Opcodes.RETURN) {
+                returns.add(insn);
+            }
+        }
+
+        for (AbstractInsnNode ret : returns) {
+            InsnList exit = new InsnList();
+            int opcode = ret.getOpcode();
+            if (returnType.getSort() == Type.VOID) {
+                append(exit, buildExitLog(classNode, method, loggerField, startTimeVar, durationVar, null, null));
+                exit.add(new InsnNode(Opcodes.RETURN));
+            } else {
+                exit.add(new VarInsnNode(returnType.getOpcode(Opcodes.ISTORE), returnVar));
+                append(exit, buildExitLog(classNode, method, loggerField, startTimeVar, durationVar, returnType, returnVar));
+                exit.add(new VarInsnNode(returnType.getOpcode(Opcodes.ILOAD), returnVar));
+                exit.add(new InsnNode(opcode));
+            }
+            method.instructions.insertBefore(ret, exit);
+            method.instructions.remove(ret);
+        }
+
+        InsnList handler = new InsnList();
+        handler.add(endLabel);
+        handler.add(handlerLabel);
+        handler.add(new VarInsnNode(Opcodes.ASTORE, exceptionVar));
+        append(handler, buildErrorLog(classNode, method, loggerField, startTimeVar, durationVar, exceptionVar));
+        handler.add(new VarInsnNode(Opcodes.ALOAD, exceptionVar));
+        handler.add(new InsnNode(Opcodes.ATHROW));
+        method.instructions.add(handler);
+
+        method.tryCatchBlocks.add(new TryCatchBlockNode(startLabel, endLabel, handlerLabel, "java/lang/Throwable"));
+    }
+
+    private InsnList buildEntryLog(ClassNode classNode, MethodNode method, FieldNode loggerField,
+                                   Type[] argTypes, int[] argIndexes) {
+        InsnList insns = new InsnList();
+        LabelNode skipLabel = new LabelNode();
+
+        insns.add(new FieldInsnNode(Opcodes.GETSTATIC, classNode.name, loggerField.name, loggerField.desc));
+        insns.add(new MethodInsnNode(Opcodes.INVOKEINTERFACE, "org/slf4j/Logger", "isDebugEnabled", "()Z", true));
+        insns.add(new JumpInsnNode(Opcodes.IFEQ, skipLabel));
+
+        append(insns, buildArgsArray(argTypes, argIndexes));
+        insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/util/Arrays", "deepToString",
+                "([Ljava/lang/Object;)Ljava/lang/String;", false));
+
+        String prefix = "Enter " + toHumanName(classNode.name) + "#" + method.name + " args=";
+        insns.add(new TypeInsnNode(Opcodes.NEW, "java/lang/StringBuilder"));
+        insns.add(new InsnNode(Opcodes.DUP));
+        insns.add(new LdcInsnNode(prefix));
+        insns.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>",
+                "(Ljava/lang/String;)V", false));
+        insns.add(new InsnNode(Opcodes.SWAP));
+        insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
+        insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "toString",
+                "()Ljava/lang/String;", false));
+
+        insns.add(new FieldInsnNode(Opcodes.GETSTATIC, classNode.name, loggerField.name, loggerField.desc));
+        insns.add(new InsnNode(Opcodes.SWAP));
+        insns.add(new MethodInsnNode(Opcodes.INVOKEINTERFACE, "org/slf4j/Logger", "debug",
+                "(Ljava/lang/String;)V", true));
+
+        insns.add(skipLabel);
+        return insns;
+    }
+
+    private InsnList buildExitLog(ClassNode classNode, MethodNode method, FieldNode loggerField,
+                                  int startTimeVar, int durationVar, Type returnType, Integer returnVar) {
+        InsnList insns = new InsnList();
+        LabelNode skipLabel = new LabelNode();
+
+        insns.add(new FieldInsnNode(Opcodes.GETSTATIC, classNode.name, loggerField.name, loggerField.desc));
+        insns.add(new MethodInsnNode(Opcodes.INVOKEINTERFACE, "org/slf4j/Logger", "isDebugEnabled", "()Z", true));
+        insns.add(new JumpInsnNode(Opcodes.IFEQ, skipLabel));
+
+        insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/System", "nanoTime", "()J", false));
+        insns.add(new VarInsnNode(Opcodes.LLOAD, startTimeVar));
+        insns.add(new InsnNode(Opcodes.LSUB));
+        insns.add(new VarInsnNode(Opcodes.LSTORE, durationVar));
+
+        String prefix = "Exit " + toHumanName(classNode.name) + "#" + method.name + " result=";
+        insns.add(new TypeInsnNode(Opcodes.NEW, "java/lang/StringBuilder"));
+        insns.add(new InsnNode(Opcodes.DUP));
+        insns.add(new LdcInsnNode(prefix));
+        insns.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>",
+                "(Ljava/lang/String;)V", false));
+
+        if (returnType == null) {
+            insns.add(new LdcInsnNode("void"));
+        } else {
+            insns.add(new VarInsnNode(returnType.getOpcode(Opcodes.ILOAD), returnVar));
+            boxValue(insns, returnType);
+        }
+        insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/String", "valueOf",
+                "(Ljava/lang/Object;)Ljava/lang/String;", false));
+        insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
+
+        insns.add(new LdcInsnNode(" took="));
+        insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
+        insns.add(new VarInsnNode(Opcodes.LLOAD, durationVar));
+        insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                "(J)Ljava/lang/StringBuilder;", false));
+        insns.add(new LdcInsnNode("ns"));
+        insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
+
+        insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "toString",
+                "()Ljava/lang/String;", false));
+        insns.add(new FieldInsnNode(Opcodes.GETSTATIC, classNode.name, loggerField.name, loggerField.desc));
+        insns.add(new InsnNode(Opcodes.SWAP));
+        insns.add(new MethodInsnNode(Opcodes.INVOKEINTERFACE, "org/slf4j/Logger", "debug",
+                "(Ljava/lang/String;)V", true));
+
+        insns.add(skipLabel);
+        return insns;
+    }
+
+    private InsnList buildErrorLog(ClassNode classNode, MethodNode method, FieldNode loggerField,
+                                   int startTimeVar, int durationVar, int exceptionVar) {
+        InsnList insns = new InsnList();
+        insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/System", "nanoTime", "()J", false));
+        insns.add(new VarInsnNode(Opcodes.LLOAD, startTimeVar));
+        insns.add(new InsnNode(Opcodes.LSUB));
+        insns.add(new VarInsnNode(Opcodes.LSTORE, durationVar));
+
+        String prefix = "Error " + toHumanName(classNode.name) + "#" + method.name + " took=";
+        insns.add(new TypeInsnNode(Opcodes.NEW, "java/lang/StringBuilder"));
+        insns.add(new InsnNode(Opcodes.DUP));
+        insns.add(new LdcInsnNode(prefix));
+        insns.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>",
+                "(Ljava/lang/String;)V", false));
+        insns.add(new VarInsnNode(Opcodes.LLOAD, durationVar));
+        insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                "(J)Ljava/lang/StringBuilder;", false));
+        insns.add(new LdcInsnNode("ns"));
+        insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
+        insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "toString",
+                "()Ljava/lang/String;", false));
+
+        insns.add(new FieldInsnNode(Opcodes.GETSTATIC, classNode.name, loggerField.name, loggerField.desc));
+        insns.add(new InsnNode(Opcodes.SWAP));
+        insns.add(new VarInsnNode(Opcodes.ALOAD, exceptionVar));
+        insns.add(new MethodInsnNode(Opcodes.INVOKEINTERFACE, "org/slf4j/Logger", "error",
+                "(Ljava/lang/String;Ljava/lang/Throwable;)V", true));
+        return insns;
+    }
+
+    private InsnList buildArgsArray(Type[] argTypes, int[] argIndexes) {
+        InsnList insns = new InsnList();
+        pushInt(insns, argTypes.length);
+        insns.add(new TypeInsnNode(Opcodes.ANEWARRAY, "java/lang/Object"));
+        for (int i = 0; i < argTypes.length; i++) {
+            Type type = argTypes[i];
+            insns.add(new InsnNode(Opcodes.DUP));
+            pushInt(insns, i);
+            insns.add(new VarInsnNode(type.getOpcode(Opcodes.ILOAD), argIndexes[i]));
+            boxValue(insns, type);
+            insns.add(new InsnNode(Opcodes.AASTORE));
+        }
+        return insns;
+    }
+
+    private void boxValue(InsnList insns, Type type) {
+        switch (type.getSort()) {
+            case Type.BOOLEAN:
+                insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/Boolean", "valueOf",
+                        "(Z)Ljava/lang/Boolean;", false));
+                break;
+            case Type.BYTE:
+                insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/Byte", "valueOf",
+                        "(B)Ljava/lang/Byte;", false));
+                break;
+            case Type.CHAR:
+                insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/Character", "valueOf",
+                        "(C)Ljava/lang/Character;", false));
+                break;
+            case Type.SHORT:
+                insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/Short", "valueOf",
+                        "(S)Ljava/lang/Short;", false));
+                break;
+            case Type.INT:
+                insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/Integer", "valueOf",
+                        "(I)Ljava/lang/Integer;", false));
+                break;
+            case Type.FLOAT:
+                insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/Float", "valueOf",
+                        "(F)Ljava/lang/Float;", false));
+                break;
+            case Type.LONG:
+                insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/Long", "valueOf",
+                        "(J)Ljava/lang/Long;", false));
+                break;
+            case Type.DOUBLE:
+                insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/Double", "valueOf",
+                        "(D)Ljava/lang/Double;", false));
+                break;
+            default:
+                break;
+        }
+    }
+
+    private void pushInt(InsnList insns, int value) {
+        if (value == -1) {
+            insns.add(new InsnNode(Opcodes.ICONST_M1));
+        } else if (value >= 0 && value <= 5) {
+            insns.add(new InsnNode(Opcodes.ICONST_0 + value));
+        } else if (value <= Byte.MAX_VALUE) {
+            insns.add(new IntInsnNode(Opcodes.BIPUSH, value));
+        } else if (value <= Short.MAX_VALUE) {
+            insns.add(new IntInsnNode(Opcodes.SIPUSH, value));
+        } else {
+            insns.add(new LdcInsnNode(value));
+        }
+    }
+
+    private int[] computeArgIndexes(boolean isStatic, Type[] argTypes) {
+        int[] indexes = new int[argTypes.length];
+        int idx = isStatic ? 0 : 1;
+        for (int i = 0; i < argTypes.length; i++) {
+            indexes[i] = idx;
+            idx += argTypes[i].getSize();
+        }
+        return indexes;
+    }
+
+    private String toHumanName(String internalName) {
+        return internalName.replace('/', '.');
+    }
+
+    private void append(InsnList target, InsnList source) {
+        for (AbstractInsnNode node : source.toArray()) {
+            target.add(node);
+        }
     }
 
     private void validateReturnType(MethodNode method, RepoMethod repoMethod) {
@@ -305,6 +654,18 @@ public class KolobokTransformer {
                 if (desc.equals(annotation.desc)) {
                     return true;
                 }
+            }
+        }
+        return false;
+    }
+
+    private boolean hasAnnotation(List<AnnotationNode> annotations, String desc) {
+        if (annotations == null) {
+            return false;
+        }
+        for (AnnotationNode annotation : annotations) {
+            if (desc.equals(annotation.desc)) {
+                return true;
             }
         }
         return false;

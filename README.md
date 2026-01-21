@@ -13,7 +13,7 @@ But if you want to find only by `cityId` and `lastName` (without specifying `fir
 ```java
     List<Person> findByLastNameAndCityId(String lastName, Long cityId);
 ```
-`@FindWithOptionalParams` annotation allows you to use original `findByFirstNameAndLastNameAndCityId` method with `null` values for params which should not be used in search criteria.
+`@FindWithOptionalParams` annotation allows you to use original `findByFirstNameAndLastNameAndCityId` method with `null` values for params which should not be used in search criteria. If the return type is `List`, ensure your repository exposes a `findAll()` that returns `List` (for example by extending `JpaRepository`).
 ```java
 @Repository
 public interface PersonRepo extends PagingAndSortingRepository<Person, Long> {
@@ -69,6 +69,24 @@ Also it generates default implementation of `findByFirstNameAndLastNameAndCityId
         }
       }
     }
+```
+
+## @LogContext
+`@LogContext` logs method entry (arguments), return values, exceptions, and execution time using an existing logger field on the class. The transformer looks for a static logger field named `log`, `logger`, `LOG`, or `LOGGER` with type `org.slf4j.Logger`. Entry/exit logs are emitted at `debug`, exceptions at `error`.
+
+```java
+import org.kolobok.annotation.LogContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class SampleService {
+    private static final Logger log = LoggerFactory.getLogger(SampleService.class);
+
+    @LogContext
+    public String work(String name, int count) {
+        return name + count;
+    }
+}
 ```
 
 ## How to use Kolobok?
