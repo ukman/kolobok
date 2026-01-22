@@ -8,4 +8,29 @@ import java.lang.annotation.Target;
 @Retention(RetentionPolicy.CLASS)
 @Target({ElementType.TYPE, ElementType.METHOD})
 public @interface LogContext {
+    boolean lineHeatMap() default false;
+    boolean lineHeatMapOnException() default false;
+    boolean subHeatMap() default false;
+    boolean logDuration() default false;
+    boolean aggregateChildren() default true;
+    boolean logArgs() default true;
+    String mask() default "";
+    int maxArgLength() default 200;
+    LogLevel logLevel() default LogLevel.DEBUG;
+    LogFormat logFormat() default LogFormat.HUMAN;
+    boolean logThreadId() default false;
+    boolean logThreadName() default false;
+
+    enum LogLevel {
+        TRACE,
+        DEBUG,
+        INFO,
+        WARN,
+        ERROR
+    }
+
+    enum LogFormat {
+        HUMAN,
+        JSON
+    }
 }

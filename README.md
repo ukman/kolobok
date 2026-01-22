@@ -72,7 +72,21 @@ Also it generates default implementation of `findByFirstNameAndLastNameAndCityId
 ```
 
 ## @LogContext
-`@LogContext` logs method entry (arguments), return values, exceptions, and execution time using an existing logger field on the class. The transformer looks for a static logger field named `log`, `logger`, `LOG`, or `LOGGER` with type `org.slf4j.Logger`. Entry/exit logs are emitted at `debug`, exceptions at `error`.
+`@LogContext` logs method entry (arguments), return values, exceptions, and execution time using an existing logger field on the class. The transformer looks for a static logger field named `log`, `logger`, `LOG`, or `LOGGER` with type `org.slf4j.Logger`. Entry/exit/heat map logs are emitted at `logLevel` (default: `DEBUG`), exceptions at `error`.
+
+Optional flags:
+- `lineHeatMap` collects per-line hit counts and logs a compressed JSON heat map after method exit.
+- `lineHeatMapOnException` logs the heat map only when the method throws.
+- `subHeatMap` suppresses top-level output when there is no parent heat map.
+- `logDuration` adds `durationNs` to the heat map JSON.
+- `aggregateChildren` collapses repeated child methods into one node (default: true).
+- `logArgs` toggles argument logging (default: true).
+- `mask` hides selected arguments by index (e.g. `"0,2-3"` or `"*"`).
+- `maxArgLength` caps stringified arguments (default: 200).
+- `logLevel` controls log level for entry/exit/heat map (`TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`).
+- `logFormat` controls log format for entry/exit/heat map (`HUMAN` or `JSON`, default: `HUMAN`).
+- `logThreadId` adds `threadId` (default: false).
+- `logThreadName` adds `threadName` (default: false).
 
 ```java
 import org.kolobok.annotation.LogContext;
@@ -82,15 +96,40 @@ import org.slf4j.LoggerFactory;
 public class SampleService {
     private static final Logger log = LoggerFactory.getLogger(SampleService.class);
 
-    @LogContext
+    @LogContext(lineHeatMap = true, logDuration = true)
     public String work(String name, int count) {
         return name + count;
     }
 }
+
+Heat map output format:
+```json
+{
+  "traceId": "b9ce1b1e-23a3-4a4f-9f0b-78e8c78d82aa",
+  "method": "com.example.Foo#bar(Ljava/lang/String;I)Ljava/lang/String;",
+  "count": 1,
+  "arguments": ["val1", 2],
+  "lineHeatMap": {
+    "100-103": 1,
+    "104": 10
+  },
+  "durationNs": 123456,
+  "children": []
+}
+```
+
+Human log examples:
+```
+[LC] ENTER com.example.Foo#bar(String, int):String trace=... t=32 tn=http-nio-8080-exec-1 args=["val1", 2]
+[LC] EXIT com.example.Foo#bar(String, int):String trace=... t=32 dur=123456ns result=ok
+[LC] ERROR com.example.Foo#bar(String, int):String trace=... t=32 dur=123456ns err=IllegalStateException:boom
+[LC] HEATMAP com.example.Foo#bar(String, int):String trace=... t=32 dur=123456ns args=["val1", 2] heatmap={100-103:1,104:10}
+  - com.example.Foo#child(String):void count=2 dur=4000ns args=["x"] heatmap={120:2}
+```
 ```
 
 ## How to use Kolobok?
-Kolobok uses a bytecode transformer after compilation, so no special compiler flags are needed. It works on Java 11 and newer (verified on 11, 17, 21, 25).
+Kolobok uses a bytecode transformer after compilation, so no special compiler flags are needed. It works on Java 11 and newer (verified on 11, 17, 21, 25). If you enable `@LogContext` heat maps, ensure the `kolobok` jar is available at runtime (do not use `provided`/`compileOnly`).
 
 Maven:
 ```xml
