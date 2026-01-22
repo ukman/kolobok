@@ -6,7 +6,7 @@
 
   <groupId>com.github.ukman</groupId>
   <artifactId>kolobok-parent</artifactId>
-  <version>0.2.3</version>
+  <version>0.2.4</version>
   <packaging>pom</packaging>
 
   <name>Kolobok Parent</name>

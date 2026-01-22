@@ -4,7 +4,7 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath 'com.github.ukman:kolobok-gradle-plugin:0.2.3'
+        classpath 'com.github.ukman:kolobok-gradle-plugin:0.2.4'
     }
 }
 
@@ -34,7 +34,11 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springdoc:springdoc-openapi-ui:1.7.0'
     runtimeOnly 'com.h2database:h2'
-    compileOnly 'com.github.ukman:kolobok:0.2.3'
+    implementation 'com.github.ukman:kolobok:0.2.4'
+    compileOnly 'org.projectlombok:lombok:1.18.32'
+    annotationProcessor 'org.projectlombok:lombok:1.18.32'
+    testCompileOnly 'org.projectlombok:lombok:1.18.32'
+    testAnnotationProcessor 'org.projectlombok:lombok:1.18.32'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 }
 
