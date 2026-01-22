@@ -7,7 +7,7 @@ import java.lang.annotation.Target;
 
 @Retention(RetentionPolicy.CLASS)
 @Target({ElementType.TYPE, ElementType.METHOD})
-public @interface LogContext {
+public @interface DebugLog {
     boolean lineHeatMap() default false;
     boolean lineHeatMapOnException() default false;
     boolean subHeatMap() default false;
@@ -20,6 +20,8 @@ public @interface LogContext {
     LogFormat logFormat() default LogFormat.HUMAN;
     boolean logThreadId() default false;
     boolean logThreadName() default false;
+    boolean logLocals() default false;
+    boolean logLocalsOnException() default false;
 
     enum LogLevel {
         TRACE,

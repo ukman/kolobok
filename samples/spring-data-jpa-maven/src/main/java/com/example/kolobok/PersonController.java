@@ -4,7 +4,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
-import org.kolobok.annotation.LogContext;
+import org.kolobok.annotation.DebugLog;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -58,7 +58,7 @@ public class PersonController {
 
     @Operation(summary = "Search persons by optional firstName/lastName")
     @GetMapping("/search")
-    @LogContext
+    @DebugLog(lineHeatMap = true)
     public List<Person> search(
             @Parameter(description = "First name") @RequestParam(required = false) String firstName,
             @Parameter(description = "Last name") @RequestParam(required = false) String lastName,

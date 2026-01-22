@@ -3,6 +3,8 @@ package com.example.kolobok;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.extern.slf4j.Slf4j;
+import org.kolobok.annotation.DebugLog;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -12,6 +14,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/persons")
 @Tag(name = "Persons", description = "CRUD operations for persons")
+@Slf4j
 public class PersonController {
     private final PersonService service;
 
@@ -55,11 +58,15 @@ public class PersonController {
 
     @Operation(summary = "Search persons by optional firstName/lastName/title")
     @GetMapping("/search")
+    @DebugLog(lineHeatMap = true)
     public List<Person> search(
             @Parameter(description = "First name") @RequestParam(required = false) String firstName,
             @Parameter(description = "Last name") @RequestParam(required = false) String lastName,
             @Parameter(description = "Title") @RequestParam(required = false) String title
     ) {
+        if ("error".equals(firstName)) {
+            throw new RuntimeException("Simulated error");
+        }
         return service.search(firstName, lastName, title);
     }
 }

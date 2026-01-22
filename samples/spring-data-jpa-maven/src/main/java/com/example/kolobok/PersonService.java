@@ -5,11 +5,15 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
 import static org.springframework.http.HttpStatus.NOT_FOUND;
+import org.kolobok.annotation.DebugLog;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
+@Slf4j
 public class PersonService {
     private final PersonRepository repository;
 
@@ -45,11 +49,29 @@ public class PersonService {
         repository.deleteById(id);
     }
 
+    @DebugLog(lineHeatMap = true, subHeatMap=true, logDuration = true, logLocalsOnException = true)
     public List<Person> search(String firstName, String lastName, String title) {
-        if (title == null) {
-            return repository.findByFirstNameAndLastName(firstName, lastName);
+        log.info("Searching for persons with firstName: {}, lastName: {}, title: {}", firstName, lastName, title);
+        List<Person> res;
+        int a = firstName == null ? 0 : firstName.length();
+        int b = lastName == null ? 0 : lastName.length();
+        if(a + b == 5) {
+            throw new IllegalArgumentException("Wrong params");
         }
-        return repository.findByFirstNameAndLastNameAndTitle(firstName, lastName, title);
+        if (title == null) {
+            res = repository.findByFirstNameAndLastName(firstName, lastName);
+        } else {
+            res = repository.findByFirstNameAndLastNameAndTitle(firstName, lastName, title);
+        }
+        res = res.stream().map(p -> findById(p.getId())).collect(Collectors.toList());
+        return res;
+    }
+
+    @DebugLog(lineHeatMap = true, subHeatMap=true, logDuration = true)
+    public Person findById(Long id) {
+        Person res = repository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Person not found"));
+        return res;
     }
 
     private List<Person> toList(Iterable<Person> iterable) {

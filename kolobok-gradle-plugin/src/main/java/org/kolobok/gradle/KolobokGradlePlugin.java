@@ -11,6 +11,7 @@ public class KolobokGradlePlugin implements Plugin<Project> {
 
     @Override
     public void apply(Project project) {
+        project.getExtensions().create("kolobok", KolobokExtension.class);
         project.getPlugins().withType(JavaPlugin.class, plugin -> {
             SourceSetContainer sourceSets = project.getExtensions().getByType(SourceSetContainer.class);
             SourceSet main = sourceSets.getByName(SourceSet.MAIN_SOURCE_SET_NAME);

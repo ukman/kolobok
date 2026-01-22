@@ -191,6 +191,102 @@ public final class LogContextTrace {
         return sb.toString();
     }
 
+    public static String maskValue(Object value, int first, int last, int maxArgLength) {
+        if (value == null) {
+            return "null";
+        }
+        String raw = String.valueOf(value);
+        String truncated = truncate(raw, maxArgLength > 0 ? maxArgLength : 200);
+        if (first <= 0 && last <= 0) {
+            return "***";
+        }
+        int length = truncated.length();
+        int prefix = Math.max(0, first);
+        int suffix = Math.max(0, last);
+        if (prefix + suffix >= length) {
+            return truncated;
+        }
+        String start = truncated.substring(0, prefix);
+        String end = truncated.substring(length - suffix);
+        return start + "***" + end;
+    }
+
+    public static String formatLocalsHuman(Object[] locals, String[] names, int[] ignoreModes,
+                                           int[] maskFirst, int[] maskLast, boolean isException, int maxArgLength) {
+        StringBuilder sb = new StringBuilder();
+        boolean first = true;
+        if (names == null || locals == null) {
+            return "";
+        }
+        for (int i = 0; i < names.length; i++) {
+            String name = names[i];
+            if (name == null) {
+                continue;
+            }
+            int mode = ignoreModes != null && i < ignoreModes.length ? ignoreModes[i] : 0;
+            if (mode == 1) {
+                continue;
+            }
+            if (mode == 2 && !isException) {
+                continue;
+            }
+            Object value = i < locals.length ? locals[i] : null;
+            String out;
+            int firstCount = maskFirst != null && i < maskFirst.length ? maskFirst[i] : 0;
+            int lastCount = maskLast != null && i < maskLast.length ? maskLast[i] : 0;
+            if (firstCount > 0 || lastCount > 0) {
+                out = maskValue(value, firstCount, lastCount, maxArgLength);
+            } else {
+                out = truncate(String.valueOf(value), maxArgLength > 0 ? maxArgLength : 200);
+            }
+            if (!first) {
+                sb.append(", ");
+            }
+            first = false;
+            sb.append(name).append('=').append(out);
+        }
+        return sb.toString();
+    }
+
+    public static String formatLocalsJson(Object[] locals, String[] names, int[] ignoreModes,
+                                          int[] maskFirst, int[] maskLast, boolean isException, int maxArgLength) {
+        StringBuilder sb = new StringBuilder();
+        boolean first = true;
+        if (names == null || locals == null) {
+            return "{}";
+        }
+        sb.append('{');
+        for (int i = 0; i < names.length; i++) {
+            String name = names[i];
+            if (name == null) {
+                continue;
+            }
+            int mode = ignoreModes != null && i < ignoreModes.length ? ignoreModes[i] : 0;
+            if (mode == 1) {
+                continue;
+            }
+            if (mode == 2 && !isException) {
+                continue;
+            }
+            Object value = i < locals.length ? locals[i] : null;
+            String out;
+            int firstCount = maskFirst != null && i < maskFirst.length ? maskFirst[i] : 0;
+            int lastCount = maskLast != null && i < maskLast.length ? maskLast[i] : 0;
+            if (firstCount > 0 || lastCount > 0) {
+                out = maskValue(value, firstCount, lastCount, maxArgLength);
+            } else {
+                out = truncate(String.valueOf(value), maxArgLength > 0 ? maxArgLength : 200);
+            }
+            if (!first) {
+                sb.append(',');
+            }
+            first = false;
+            sb.append('"').append(escapeJson(name)).append("\":\"").append(escapeJson(out)).append('"');
+        }
+        sb.append('}');
+        return sb.toString();
+    }
+
     private static final class TraceState {
         private final String traceId;
         private final boolean suppressedRoot;
@@ -271,7 +367,7 @@ public final class LogContextTrace {
     private static void appendHumanNode(StringBuilder sb, TraceNode node, int depth, String traceId,
                                         boolean logThreadId, boolean logThreadName) {
         if (depth == 0) {
-            sb.append("[LC] HEATMAP ");
+            sb.append("[KLB] HEATMAP ");
         } else {
             for (int i = 0; i < depth; i++) {
                 sb.append("  ");

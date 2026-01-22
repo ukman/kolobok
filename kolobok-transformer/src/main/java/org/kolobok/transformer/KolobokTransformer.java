@@ -14,10 +14,13 @@ import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.IntInsnNode;
 import org.objectweb.asm.tree.InsnList;
 import org.objectweb.asm.tree.InsnNode;
+import org.objectweb.asm.tree.IincInsnNode;
 import org.objectweb.asm.tree.JumpInsnNode;
 import org.objectweb.asm.tree.LabelNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.LineNumberNode;
+import org.objectweb.asm.tree.LocalVariableAnnotationNode;
+import org.objectweb.asm.tree.LocalVariableNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.TryCatchBlockNode;
@@ -39,9 +42,20 @@ import java.util.stream.Stream;
 
 public class KolobokTransformer {
     public static final String OPTIONAL_PARAMS_DESC = "Lorg/kolobok/annotation/FindWithOptionalParams;";
-    public static final String LOG_CONTEXT_DESC = "Lorg/kolobok/annotation/LogContext;";
+    public static final String DEBUG_LOG_DESC = "Lorg/kolobok/annotation/DebugLog;";
+    public static final String DEBUG_LOG_IGNORE_DESC = "Lorg/kolobok/annotation/DebugLogIgnore;";
+    public static final String DEBUG_LOG_MASK_DESC = "Lorg/kolobok/annotation/DebugLogMask;";
     private static final String SLF4J_LOGGER_DESC = "Lorg/slf4j/Logger;";
     private static final String[] LOGGER_FIELD_NAMES = {"log", "logger", "LOG", "LOGGER"};
+    private final DebugLogDefaults defaults;
+
+    public KolobokTransformer() {
+        this(DebugLogDefaults.fromSystemEnv());
+    }
+
+    public KolobokTransformer(DebugLogDefaults defaults) {
+        this.defaults = defaults == null ? new DebugLogDefaults() : defaults;
+    }
 
     private final RepoMethodUtil repoMethodUtil = new RepoMethodUtil();
 
@@ -119,9 +133,9 @@ public class KolobokTransformer {
     }
 
     private boolean transformLogContext(ClassNode classNode) {
-        AnnotationNode classAnnotation = findAnnotation(classNode.visibleAnnotations, LOG_CONTEXT_DESC);
+        AnnotationNode classAnnotation = findAnnotation(classNode.visibleAnnotations, DEBUG_LOG_DESC);
         if (classAnnotation == null) {
-            classAnnotation = findAnnotation(classNode.invisibleAnnotations, LOG_CONTEXT_DESC);
+            classAnnotation = findAnnotation(classNode.invisibleAnnotations, DEBUG_LOG_DESC);
         }
 
         Map<MethodNode, LogContextConfig> methodsToInstrument = new HashMap<>();
@@ -139,7 +153,7 @@ public class KolobokTransformer {
         FieldNode loggerField = findLoggerField(classNode);
         if (loggerField == null) {
             throw new IllegalStateException("Class '" + classNode.name
-                    + "' uses @LogContext but no static logger field named log/logger/LOG/LOGGER with type org.slf4j.Logger was found");
+                    + "' uses @DebugLog but no static logger field named log/logger/LOG/LOGGER with type org.slf4j.Logger was found");
         }
 
         for (Map.Entry<MethodNode, LogContextConfig> entry : methodsToInstrument.entrySet()) {
@@ -163,31 +177,79 @@ public class KolobokTransformer {
     }
 
     private LogContextConfig resolveLogContextConfig(MethodNode method, AnnotationNode classAnnotation) {
-        AnnotationNode methodAnnotation = findAnnotation(method, LOG_CONTEXT_DESC);
+        AnnotationNode methodAnnotation = findAnnotation(method, DEBUG_LOG_DESC);
         if (methodAnnotation == null) {
             methodAnnotation = classAnnotation;
         }
         if (methodAnnotation == null) {
             return null;
         }
-        boolean lineHeatMap = getBooleanValue(methodAnnotation, "lineHeatMap", false);
-        boolean lineHeatMapOnException = getBooleanValue(methodAnnotation, "lineHeatMapOnException", false);
-        boolean subHeatMap = getBooleanValue(methodAnnotation, "subHeatMap", false);
-        boolean logDuration = getBooleanValue(methodAnnotation, "logDuration", false);
-        boolean aggregateChildren = getBooleanValue(methodAnnotation, "aggregateChildren", true);
-        boolean logArgs = getBooleanValue(methodAnnotation, "logArgs", true);
-        String mask = getStringValue(methodAnnotation, "mask", "");
-        int maxArgLength = getIntValue(methodAnnotation, "maxArgLength", 200);
-        String logLevelName = getEnumValue(methodAnnotation, "logLevel", "DEBUG");
-        String logFormatName = getEnumValue(methodAnnotation, "logFormat", "HUMAN");
-        boolean logThreadId = getBooleanValue(methodAnnotation, "logThreadId", false);
-        boolean logThreadName = getBooleanValue(methodAnnotation, "logThreadName", false);
+        boolean lineHeatMap = resolveBoolean(methodAnnotation, "lineHeatMap",
+                DebugLogDefaults.DEFAULT_LINE_HEAT_MAP, defaults.getLineHeatMap());
+        boolean lineHeatMapOnException = resolveBoolean(methodAnnotation, "lineHeatMapOnException",
+                DebugLogDefaults.DEFAULT_LINE_HEAT_MAP_ON_EXCEPTION, defaults.getLineHeatMapOnException());
+        boolean subHeatMap = resolveBoolean(methodAnnotation, "subHeatMap",
+                DebugLogDefaults.DEFAULT_SUB_HEAT_MAP, defaults.getSubHeatMap());
+        boolean logDuration = resolveBoolean(methodAnnotation, "logDuration",
+                DebugLogDefaults.DEFAULT_LOG_DURATION, defaults.getLogDuration());
+        boolean aggregateChildren = resolveBoolean(methodAnnotation, "aggregateChildren",
+                DebugLogDefaults.DEFAULT_AGGREGATE_CHILDREN, defaults.getAggregateChildren());
+        boolean logArgs = resolveBoolean(methodAnnotation, "logArgs",
+                DebugLogDefaults.DEFAULT_LOG_ARGS, defaults.getLogArgs());
+        String mask = resolveString(methodAnnotation, "mask",
+                DebugLogDefaults.DEFAULT_MASK, defaults.getMask());
+        int maxArgLength = resolveInt(methodAnnotation, "maxArgLength",
+                DebugLogDefaults.DEFAULT_MAX_ARG_LENGTH, defaults.getMaxArgLength());
+        String logLevelName = resolveEnum(methodAnnotation, "logLevel",
+                DebugLogDefaults.DEFAULT_LOG_LEVEL.name(), defaults.getLogLevel());
+        String logFormatName = resolveEnum(methodAnnotation, "logFormat",
+                DebugLogDefaults.DEFAULT_LOG_FORMAT.name(), defaults.getLogFormat());
+        boolean logThreadId = resolveBoolean(methodAnnotation, "logThreadId",
+                DebugLogDefaults.DEFAULT_LOG_THREAD_ID, defaults.getLogThreadId());
+        boolean logThreadName = resolveBoolean(methodAnnotation, "logThreadName",
+                DebugLogDefaults.DEFAULT_LOG_THREAD_NAME, defaults.getLogThreadName());
+        boolean logLocals = resolveBoolean(methodAnnotation, "logLocals",
+                DebugLogDefaults.DEFAULT_LOG_LOCALS, defaults.getLogLocals());
+        boolean logLocalsOnException = resolveBoolean(methodAnnotation, "logLocalsOnException",
+                DebugLogDefaults.DEFAULT_LOG_LOCALS_ON_EXCEPTION, defaults.getLogLocalsOnException());
         if (lineHeatMapOnException) {
             lineHeatMap = true;
         }
         return new LogContextConfig(lineHeatMap, lineHeatMapOnException, subHeatMap, logDuration, aggregateChildren,
                 logArgs, mask, maxArgLength, LogLevelConfig.fromName(logLevelName),
-                LogFormatConfig.fromName(logFormatName), logThreadId, logThreadName);
+                LogFormatConfig.fromName(logFormatName), logThreadId, logThreadName, logLocals, logLocalsOnException);
+    }
+
+    private boolean resolveBoolean(AnnotationNode annotation, String name, boolean builtinDefault, Boolean override) {
+        boolean value = getBooleanValue(annotation, name, builtinDefault);
+        if (value == builtinDefault && override != null) {
+            return override;
+        }
+        return value;
+    }
+
+    private int resolveInt(AnnotationNode annotation, String name, int builtinDefault, Integer override) {
+        int value = getIntValue(annotation, name, builtinDefault);
+        if (value == builtinDefault && override != null) {
+            return override;
+        }
+        return value;
+    }
+
+    private String resolveString(AnnotationNode annotation, String name, String builtinDefault, String override) {
+        String value = getStringValue(annotation, name, builtinDefault);
+        if (builtinDefault.equals(value) && override != null) {
+            return override;
+        }
+        return value;
+    }
+
+    private String resolveEnum(AnnotationNode annotation, String name, String builtinDefault, Enum<?> override) {
+        String value = getEnumValue(annotation, name, builtinDefault);
+        if (builtinDefault.equals(value) && override != null) {
+            return override.name();
+        }
+        return value;
     }
 
     private FieldNode findLoggerField(ClassNode classNode) {
@@ -215,6 +277,10 @@ public class KolobokTransformer {
 
         List<Integer> lineNumbers = config.lineHeatMap ? collectLineNumbers(method.instructions) : Collections.emptyList();
         boolean hasHeatMap = config.lineHeatMap && !lineNumbers.isEmpty();
+        int originalMaxLocals = method.maxLocals;
+        ParamLogConfig[] paramConfigs = buildParamConfigs(method, argTypes.length);
+        LocalLogConfig localLogConfig = buildLocalLogConfig(method, originalMaxLocals, config.logLocals || config.logLocalsOnException);
+        boolean enableLocalLogs = (config.logLocals || config.logLocalsOnException) && localLogConfig.hasAnnotations;
 
         int nextLocal = method.maxLocals;
         int linesVar = -1;
@@ -235,8 +301,20 @@ public class KolobokTransformer {
             nextLocal += returnType.getSize();
         }
 
-        int durationVar = nextLocal;
-        nextLocal += 2;
+        int localsSnapshotVar = -1;
+        int localsNamesVar = -1;
+        int localsIgnoreVar = -1;
+        int localsMaskFirstVar = -1;
+        int localsMaskLastVar = -1;
+        if (enableLocalLogs) {
+            localsSnapshotVar = nextLocal++;
+            localsNamesVar = nextLocal++;
+            localsIgnoreVar = nextLocal++;
+            localsMaskFirstVar = nextLocal++;
+            localsMaskLastVar = nextLocal++;
+        }
+
+        int durationVar = startTimeVar;
 
         int exceptionVar = nextLocal;
         nextLocal += 1;
@@ -252,13 +330,21 @@ public class KolobokTransformer {
             append(entry, buildLineArrayInit(lineNumbers, linesVar, countsVar));
             insertLineCounters(method, lineNumbers, countsVar);
             append(entry, buildTraceEnter(classNode, method, traceVar, config.subHeatMap, config.aggregateChildren,
-                    config.logArgs, config.mask, config.maxArgLength, config.logFormat, argTypes, argIndexes));
+                    config.logArgs, config.mask, config.maxArgLength, config.logFormat, argTypes, argIndexes, paramConfigs));
         }
         entry.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/System", "nanoTime", "()J", false));
         entry.add(new VarInsnNode(Opcodes.LSTORE, startTimeVar));
-        append(entry, buildEntryLog(classNode, method, loggerField, config, argTypes, argIndexes));
+        if (enableLocalLogs) {
+            append(entry, buildLocalLogInit(localLogConfig, originalMaxLocals, localsSnapshotVar, localsNamesVar,
+                    localsIgnoreVar, localsMaskFirstVar, localsMaskLastVar));
+        }
+        append(entry, buildEntryLog(classNode, method, loggerField, config, argTypes, argIndexes, paramConfigs));
         entry.add(startLabel);
         method.instructions.insert(entry);
+
+        if (enableLocalLogs) {
+            insertLocalSnapshotUpdates(method, localLogConfig, localsSnapshotVar);
+        }
 
         List<AbstractInsnNode> returns = new ArrayList<>();
         for (AbstractInsnNode insn = method.instructions.getFirst(); insn != null; insn = insn.getNext()) {
@@ -272,14 +358,16 @@ public class KolobokTransformer {
             InsnList exit = new InsnList();
             int opcode = ret.getOpcode();
             if (returnType.getSort() == Type.VOID) {
-                append(exit, buildExitLog(classNode, method, loggerField, config, startTimeVar, durationVar, null, null));
+                append(exit, buildExitLog(classNode, method, loggerField, config, startTimeVar, durationVar, null, null,
+                        localsSnapshotVar, localsNamesVar, localsIgnoreVar, localsMaskFirstVar, localsMaskLastVar, enableLocalLogs));
                 if (hasHeatMap) {
                     append(exit, buildHeatMapLog(classNode, method, loggerField, linesVar, countsVar, traceVar, config, durationVar, false));
                 }
                 exit.add(new InsnNode(Opcodes.RETURN));
             } else {
                 exit.add(new VarInsnNode(returnType.getOpcode(Opcodes.ISTORE), returnVar));
-                append(exit, buildExitLog(classNode, method, loggerField, config, startTimeVar, durationVar, returnType, returnVar));
+                append(exit, buildExitLog(classNode, method, loggerField, config, startTimeVar, durationVar, returnType, returnVar,
+                        localsSnapshotVar, localsNamesVar, localsIgnoreVar, localsMaskFirstVar, localsMaskLastVar, enableLocalLogs));
                 if (hasHeatMap) {
                     append(exit, buildHeatMapLog(classNode, method, loggerField, linesVar, countsVar, traceVar, config, durationVar, false));
                 }
@@ -294,7 +382,9 @@ public class KolobokTransformer {
         handler.add(endLabel);
         handler.add(handlerLabel);
         handler.add(new VarInsnNode(Opcodes.ASTORE, exceptionVar));
-        append(handler, buildErrorLog(classNode, method, loggerField, config, startTimeVar, durationVar, exceptionVar));
+        append(handler, buildErrorLog(classNode, method, loggerField, config, startTimeVar, durationVar, exceptionVar,
+                argTypes, argIndexes, paramConfigs, localsSnapshotVar, localsNamesVar, localsIgnoreVar,
+                localsMaskFirstVar, localsMaskLastVar, enableLocalLogs));
         if (hasHeatMap) {
             append(handler, buildHeatMapLog(classNode, method, loggerField, linesVar, countsVar, traceVar, config, durationVar, true));
         }
@@ -306,7 +396,7 @@ public class KolobokTransformer {
     }
 
     private InsnList buildEntryLog(ClassNode classNode, MethodNode method, FieldNode loggerField,
-                                   LogContextConfig config, Type[] argTypes, int[] argIndexes) {
+                                   LogContextConfig config, Type[] argTypes, int[] argIndexes, ParamLogConfig[] paramConfigs) {
         InsnList insns = new InsnList();
         LabelNode skipLabel = new LabelNode();
 
@@ -321,7 +411,7 @@ public class KolobokTransformer {
         if (config.logFormat.jsonFormat) {
             insns.add(new LdcInsnNode("{\"type\":\"enter\",\"method\":\"" + escapeJson(methodDisplay) + "\""));
         } else {
-            insns.add(new LdcInsnNode("[LC] ENTER " + methodDisplay));
+            insns.add(new LdcInsnNode("[KLB] ENTER " + methodDisplay));
         }
         insns.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>",
                 "(Ljava/lang/String;)V", false));
@@ -338,7 +428,7 @@ public class KolobokTransformer {
                 insns.add(new LdcInsnNode(",\"args\":"));
                 insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
                         "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
-                append(insns, buildArgsArray(argTypes, argIndexes));
+                append(insns, buildAnnotatedArgsArray(argTypes, argIndexes, paramConfigs, false, config.maxArgLength));
                 insns.add(new LdcInsnNode(config.mask));
                 insns.add(new LdcInsnNode(config.maxArgLength));
                 insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "org/kolobok/runtime/LogContextTrace", "formatArgsJson",
@@ -361,7 +451,7 @@ public class KolobokTransformer {
                 insns.add(new LdcInsnNode(" args="));
                 insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
                         "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
-                append(insns, buildArgsArray(argTypes, argIndexes));
+                append(insns, buildAnnotatedArgsArray(argTypes, argIndexes, paramConfigs, false, config.maxArgLength));
                 insns.add(new LdcInsnNode(config.mask));
                 insns.add(new LdcInsnNode(config.maxArgLength));
                 insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "org/kolobok/runtime/LogContextTrace", "formatArgs",
@@ -385,7 +475,9 @@ public class KolobokTransformer {
 
     private InsnList buildExitLog(ClassNode classNode, MethodNode method, FieldNode loggerField,
                                   LogContextConfig config, int startTimeVar, int durationVar,
-                                  Type returnType, Integer returnVar) {
+                                  Type returnType, Integer returnVar, int localsSnapshotVar, int localsNamesVar,
+                                  int localsIgnoreVar, int localsMaskFirstVar, int localsMaskLastVar,
+                                  boolean hasLocalAnnotations) {
         InsnList insns = new InsnList();
         LabelNode skipLabel = new LabelNode();
 
@@ -405,7 +497,7 @@ public class KolobokTransformer {
         if (config.logFormat.jsonFormat) {
             insns.add(new LdcInsnNode("{\"type\":\"exit\",\"method\":\"" + escapeJson(methodDisplay) + "\""));
         } else {
-            insns.add(new LdcInsnNode("[LC] EXIT " + methodDisplay));
+            insns.add(new LdcInsnNode("[KLB] EXIT " + methodDisplay));
         }
         insns.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>",
                 "(Ljava/lang/String;)V", false));
@@ -424,6 +516,22 @@ public class KolobokTransformer {
             insns.add(new VarInsnNode(Opcodes.LLOAD, durationVar));
             insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
                     "(J)Ljava/lang/StringBuilder;", false));
+            if (config.logLocals && hasLocalAnnotations) {
+                insns.add(new LdcInsnNode(",\"locals\":"));
+                insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                        "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
+                insns.add(new VarInsnNode(Opcodes.ALOAD, localsSnapshotVar));
+                insns.add(new VarInsnNode(Opcodes.ALOAD, localsNamesVar));
+                insns.add(new VarInsnNode(Opcodes.ALOAD, localsIgnoreVar));
+                insns.add(new VarInsnNode(Opcodes.ALOAD, localsMaskFirstVar));
+                insns.add(new VarInsnNode(Opcodes.ALOAD, localsMaskLastVar));
+                insns.add(new InsnNode(Opcodes.ICONST_0));
+                insns.add(new LdcInsnNode(config.maxArgLength));
+                insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "org/kolobok/runtime/LogContextTrace", "formatLocalsJson",
+                        "([Ljava/lang/Object;[Ljava/lang/String;[I[I[IZI)Ljava/lang/String;", false));
+                insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                        "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
+            }
             insns.add(new LdcInsnNode(",\"result\":\""));
             insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
                     "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
@@ -469,6 +577,25 @@ public class KolobokTransformer {
                     "(Ljava/lang/Object;)Ljava/lang/String;", false));
             insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
                     "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
+            if (config.logLocals && hasLocalAnnotations) {
+                insns.add(new LdcInsnNode(" locals={"));
+                insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                        "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
+                insns.add(new VarInsnNode(Opcodes.ALOAD, localsSnapshotVar));
+                insns.add(new VarInsnNode(Opcodes.ALOAD, localsNamesVar));
+                insns.add(new VarInsnNode(Opcodes.ALOAD, localsIgnoreVar));
+                insns.add(new VarInsnNode(Opcodes.ALOAD, localsMaskFirstVar));
+                insns.add(new VarInsnNode(Opcodes.ALOAD, localsMaskLastVar));
+                insns.add(new InsnNode(Opcodes.ICONST_0));
+                insns.add(new LdcInsnNode(config.maxArgLength));
+                insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "org/kolobok/runtime/LogContextTrace", "formatLocalsHuman",
+                        "([Ljava/lang/Object;[Ljava/lang/String;[I[I[IZI)Ljava/lang/String;", false));
+                insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                        "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
+                insns.add(new LdcInsnNode("}"));
+                insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                        "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
+            }
         }
 
         insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "toString",
@@ -483,7 +610,10 @@ public class KolobokTransformer {
     }
 
     private InsnList buildErrorLog(ClassNode classNode, MethodNode method, FieldNode loggerField,
-                                   LogContextConfig config, int startTimeVar, int durationVar, int exceptionVar) {
+                                   LogContextConfig config, int startTimeVar, int durationVar, int exceptionVar,
+                                   Type[] argTypes, int[] argIndexes, ParamLogConfig[] paramConfigs,
+                                   int localsSnapshotVar, int localsNamesVar, int localsIgnoreVar,
+                                   int localsMaskFirstVar, int localsMaskLastVar, boolean hasLocalAnnotations) {
         InsnList insns = new InsnList();
         insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/System", "nanoTime", "()J", false));
         insns.add(new VarInsnNode(Opcodes.LLOAD, startTimeVar));
@@ -496,7 +626,7 @@ public class KolobokTransformer {
         if (config.logFormat.jsonFormat) {
             insns.add(new LdcInsnNode("{\"type\":\"error\",\"method\":\"" + escapeJson(methodDisplay) + "\""));
         } else {
-            insns.add(new LdcInsnNode("[LC] ERROR " + methodDisplay));
+            insns.add(new LdcInsnNode("[KLB] ERROR " + methodDisplay));
         }
         insns.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>",
                 "(Ljava/lang/String;)V", false));
@@ -515,6 +645,34 @@ public class KolobokTransformer {
             insns.add(new VarInsnNode(Opcodes.LLOAD, durationVar));
             insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
                     "(J)Ljava/lang/StringBuilder;", false));
+            if (config.logArgs) {
+                insns.add(new LdcInsnNode(",\"args\":"));
+                insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                        "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
+                append(insns, buildAnnotatedArgsArray(argTypes, argIndexes, paramConfigs, true, config.maxArgLength));
+                insns.add(new LdcInsnNode(config.mask));
+                insns.add(new LdcInsnNode(config.maxArgLength));
+                insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "org/kolobok/runtime/LogContextTrace", "formatArgsJson",
+                        "([Ljava/lang/Object;Ljava/lang/String;I)Ljava/lang/String;", false));
+                insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                        "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
+            }
+            if (hasLocalAnnotations && (config.logLocalsOnException || config.logLocals)) {
+                insns.add(new LdcInsnNode(",\"locals\":"));
+                insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                        "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
+                insns.add(new VarInsnNode(Opcodes.ALOAD, localsSnapshotVar));
+                insns.add(new VarInsnNode(Opcodes.ALOAD, localsNamesVar));
+                insns.add(new VarInsnNode(Opcodes.ALOAD, localsIgnoreVar));
+                insns.add(new VarInsnNode(Opcodes.ALOAD, localsMaskFirstVar));
+                insns.add(new VarInsnNode(Opcodes.ALOAD, localsMaskLastVar));
+                insns.add(new InsnNode(Opcodes.ICONST_1));
+                insns.add(new LdcInsnNode(config.maxArgLength));
+                insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "org/kolobok/runtime/LogContextTrace", "formatLocalsJson",
+                        "([Ljava/lang/Object;[Ljava/lang/String;[I[I[IZI)Ljava/lang/String;", false));
+                insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                        "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
+            }
             insns.add(new LdcInsnNode(",\"error\":\""));
             insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
                     "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
@@ -542,7 +700,41 @@ public class KolobokTransformer {
             insns.add(new VarInsnNode(Opcodes.LLOAD, durationVar));
             insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
                     "(J)Ljava/lang/StringBuilder;", false));
-            insns.add(new LdcInsnNode("ns err="));
+            insns.add(new LdcInsnNode("ns"));
+            insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                    "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
+            if (config.logArgs) {
+                insns.add(new LdcInsnNode(" args="));
+                insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                        "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
+                append(insns, buildAnnotatedArgsArray(argTypes, argIndexes, paramConfigs, true, config.maxArgLength));
+                insns.add(new LdcInsnNode(config.mask));
+                insns.add(new LdcInsnNode(config.maxArgLength));
+                insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "org/kolobok/runtime/LogContextTrace", "formatArgs",
+                        "([Ljava/lang/Object;Ljava/lang/String;I)Ljava/lang/String;", false));
+                insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                        "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
+            }
+            if (hasLocalAnnotations && (config.logLocalsOnException || config.logLocals)) {
+                insns.add(new LdcInsnNode(" locals={"));
+                insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                        "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
+                insns.add(new VarInsnNode(Opcodes.ALOAD, localsSnapshotVar));
+                insns.add(new VarInsnNode(Opcodes.ALOAD, localsNamesVar));
+                insns.add(new VarInsnNode(Opcodes.ALOAD, localsIgnoreVar));
+                insns.add(new VarInsnNode(Opcodes.ALOAD, localsMaskFirstVar));
+                insns.add(new VarInsnNode(Opcodes.ALOAD, localsMaskLastVar));
+                insns.add(new InsnNode(Opcodes.ICONST_1));
+                insns.add(new LdcInsnNode(config.maxArgLength));
+                insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "org/kolobok/runtime/LogContextTrace", "formatLocalsHuman",
+                        "([Ljava/lang/Object;[Ljava/lang/String;[I[I[IZI)Ljava/lang/String;", false));
+                insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                        "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
+                insns.add(new LdcInsnNode("}"));
+                insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                        "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
+            }
+            insns.add(new LdcInsnNode(" err="));
             insns.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
                     "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false));
             insns.add(new VarInsnNode(Opcodes.ALOAD, exceptionVar));
@@ -654,7 +846,8 @@ public class KolobokTransformer {
 
     private InsnList buildTraceEnter(ClassNode classNode, MethodNode method, int traceVar, boolean subHeatMap,
                                      boolean aggregateChildren, boolean logArgs, String mask, int maxArgLength,
-                                     LogFormatConfig logFormat, Type[] argTypes, int[] argIndexes) {
+                                     LogFormatConfig logFormat, Type[] argTypes, int[] argIndexes,
+                                     ParamLogConfig[] paramConfigs) {
         InsnList insns = new InsnList();
         String methodDescriptor = logFormat.jsonFormat
                 ? buildMethodDescriptor(classNode, method)
@@ -666,7 +859,7 @@ public class KolobokTransformer {
         insns.add(new LdcInsnNode(mask));
         insns.add(new LdcInsnNode(maxArgLength));
         if (logArgs) {
-            append(insns, buildArgsArray(argTypes, argIndexes));
+            append(insns, buildAnnotatedArgsArray(argTypes, argIndexes, paramConfigs, false, maxArgLength));
         } else {
             insns.add(new InsnNode(Opcodes.ACONST_NULL));
         }
@@ -706,6 +899,41 @@ public class KolobokTransformer {
             pushInt(insns, i);
             insns.add(new VarInsnNode(type.getOpcode(Opcodes.ILOAD), argIndexes[i]));
             boxValue(insns, type);
+            insns.add(new InsnNode(Opcodes.AASTORE));
+        }
+        return insns;
+    }
+
+    private InsnList buildAnnotatedArgsArray(Type[] argTypes, int[] argIndexes, ParamLogConfig[] paramConfigs,
+                                             boolean forException, int maxArgLength) {
+        if (paramConfigs == null || paramConfigs.length == 0) {
+            return buildArgsArray(argTypes, argIndexes);
+        }
+        InsnList insns = new InsnList();
+        pushInt(insns, argTypes.length);
+        insns.add(new TypeInsnNode(Opcodes.ANEWARRAY, "java/lang/Object"));
+        for (int i = 0; i < argTypes.length; i++) {
+            ParamLogConfig config = paramConfigs[i];
+            insns.add(new InsnNode(Opcodes.DUP));
+            pushInt(insns, i);
+            if (config != null && config.shouldIgnore(forException)) {
+                insns.add(new LdcInsnNode("***"));
+                insns.add(new InsnNode(Opcodes.AASTORE));
+                continue;
+            }
+            if (config != null && config.hasMask()) {
+                insns.add(new VarInsnNode(argTypes[i].getOpcode(Opcodes.ILOAD), argIndexes[i]));
+                boxValue(insns, argTypes[i]);
+                insns.add(new LdcInsnNode(config.maskFirst));
+                insns.add(new LdcInsnNode(config.maskLast));
+                insns.add(new LdcInsnNode(maxArgLength));
+                insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "org/kolobok/runtime/LogContextTrace", "maskValue",
+                        "(Ljava/lang/Object;III)Ljava/lang/String;", false));
+                insns.add(new InsnNode(Opcodes.AASTORE));
+                continue;
+            }
+            insns.add(new VarInsnNode(argTypes[i].getOpcode(Opcodes.ILOAD), argIndexes[i]));
+            boxValue(insns, argTypes[i]);
             insns.add(new InsnNode(Opcodes.AASTORE));
         }
         return insns;
@@ -772,6 +1000,220 @@ public class KolobokTransformer {
             idx += argTypes[i].getSize();
         }
         return indexes;
+    }
+
+    private ParamLogConfig[] buildParamConfigs(MethodNode method, int paramCount) {
+        ParamLogConfig[] configs = new ParamLogConfig[paramCount];
+        List<AnnotationNode>[] visible = method.visibleParameterAnnotations;
+        List<AnnotationNode>[] invisible = method.invisibleParameterAnnotations;
+        for (int i = 0; i < paramCount; i++) {
+            ParamLogConfig config = new ParamLogConfig();
+            boolean configured = false;
+            if (visible != null && i < visible.length) {
+                configured |= applyParamAnnotations(config, visible[i]);
+            }
+            if (invisible != null && i < invisible.length) {
+                configured |= applyParamAnnotations(config, invisible[i]);
+            }
+            configs[i] = configured ? config : null;
+        }
+        return configs;
+    }
+
+    private boolean applyParamAnnotations(ParamLogConfig config, List<AnnotationNode> annotations) {
+        if (annotations == null) {
+            return false;
+        }
+        boolean configured = false;
+        for (AnnotationNode annotation : annotations) {
+            if (DEBUG_LOG_IGNORE_DESC.equals(annotation.desc)) {
+                String mode = getEnumValue(annotation, "mode", "ALWAYS");
+                config.ignoreMode = "SUCCESS".equalsIgnoreCase(mode) ? IgnoreMode.SUCCESS : IgnoreMode.ALWAYS;
+                configured = true;
+            } else if (DEBUG_LOG_MASK_DESC.equals(annotation.desc)) {
+                config.maskFirst = getIntValue(annotation, "first", 0);
+                config.maskLast = getIntValue(annotation, "last", 0);
+                configured = true;
+            }
+        }
+        return configured;
+    }
+
+    private LocalLogConfig buildLocalLogConfig(MethodNode method, int localsSize, boolean includeAllLocals) {
+        LocalLogConfig config = new LocalLogConfig(localsSize);
+        config.includeAllLocals = includeAllLocals;
+        if (method.visibleLocalVariableAnnotations != null) {
+            applyLocalVariableAnnotations(config, method.visibleLocalVariableAnnotations);
+        }
+        if (method.invisibleLocalVariableAnnotations != null) {
+            applyLocalVariableAnnotations(config, method.invisibleLocalVariableAnnotations);
+        }
+        if (!config.hasAnnotations && !includeAllLocals) {
+            return config;
+        }
+        if (includeAllLocals) {
+            config.hasAnnotations = true;
+        }
+        config.names = new String[localsSize];
+        config.ignoreModes = new int[localsSize];
+        config.maskFirst = new int[localsSize];
+        config.maskLast = new int[localsSize];
+        if (includeAllLocals) {
+            for (int i = 0; i < localsSize; i++) {
+                config.names[i] = "var" + i;
+            }
+        }
+        if (method.localVariables != null) {
+            for (LocalVariableNode var : method.localVariables) {
+                if (var.index >= 0 && var.index < localsSize && config.hasIndex(var.index)) {
+                    if (config.names[var.index] == null) {
+                        config.names[var.index] = var.name;
+                    }
+                }
+            }
+        }
+        for (LocalVarConfig entry : config.entries) {
+            int idx = entry.index;
+            if (idx >= 0 && idx < localsSize) {
+                if (config.names[idx] == null) {
+                    config.names[idx] = "var" + idx;
+                }
+                config.ignoreModes[idx] = entry.ignoreMode == IgnoreMode.ALWAYS ? 1
+                        : entry.ignoreMode == IgnoreMode.SUCCESS ? 2 : 0;
+                config.maskFirst[idx] = entry.maskFirst;
+                config.maskLast[idx] = entry.maskLast;
+            }
+        }
+        return config;
+    }
+
+    private void applyLocalVariableAnnotations(LocalLogConfig config, List<LocalVariableAnnotationNode> annotations) {
+        for (LocalVariableAnnotationNode annotation : annotations) {
+            if (!DEBUG_LOG_IGNORE_DESC.equals(annotation.desc) && !DEBUG_LOG_MASK_DESC.equals(annotation.desc)) {
+                continue;
+            }
+            for (int index : annotation.index) {
+                LocalVarConfig entry = config.findOrCreate(index);
+                if (DEBUG_LOG_IGNORE_DESC.equals(annotation.desc)) {
+                    String mode = getEnumValue(annotation, "mode", "ALWAYS");
+                    entry.ignoreMode = "SUCCESS".equalsIgnoreCase(mode) ? IgnoreMode.SUCCESS : IgnoreMode.ALWAYS;
+                } else if (DEBUG_LOG_MASK_DESC.equals(annotation.desc)) {
+                    entry.maskFirst = getIntValue(annotation, "first", 0);
+                    entry.maskLast = getIntValue(annotation, "last", 0);
+                }
+                config.hasAnnotations = true;
+            }
+        }
+    }
+
+    private InsnList buildLocalLogInit(LocalLogConfig config, int localsSize, int snapshotVar, int namesVar,
+                                       int ignoreVar, int maskFirstVar, int maskLastVar) {
+        InsnList insns = new InsnList();
+        pushInt(insns, localsSize);
+        insns.add(new TypeInsnNode(Opcodes.ANEWARRAY, "java/lang/Object"));
+        insns.add(new VarInsnNode(Opcodes.ASTORE, snapshotVar));
+        pushInt(insns, localsSize);
+        insns.add(new TypeInsnNode(Opcodes.ANEWARRAY, "java/lang/String"));
+        insns.add(new VarInsnNode(Opcodes.ASTORE, namesVar));
+        pushInt(insns, localsSize);
+        insns.add(new IntInsnNode(Opcodes.NEWARRAY, Opcodes.T_INT));
+        insns.add(new VarInsnNode(Opcodes.ASTORE, ignoreVar));
+        pushInt(insns, localsSize);
+        insns.add(new IntInsnNode(Opcodes.NEWARRAY, Opcodes.T_INT));
+        insns.add(new VarInsnNode(Opcodes.ASTORE, maskFirstVar));
+        pushInt(insns, localsSize);
+        insns.add(new IntInsnNode(Opcodes.NEWARRAY, Opcodes.T_INT));
+        insns.add(new VarInsnNode(Opcodes.ASTORE, maskLastVar));
+
+        for (int i = 0; i < localsSize; i++) {
+            if (config.names == null || config.names.length <= i) {
+                continue;
+            }
+            String name = config.names[i];
+            if (name != null) {
+                insns.add(new VarInsnNode(Opcodes.ALOAD, namesVar));
+                pushInt(insns, i);
+                insns.add(new LdcInsnNode(name));
+                insns.add(new InsnNode(Opcodes.AASTORE));
+            }
+            int ignore = config.ignoreModes != null && config.ignoreModes.length > i ? config.ignoreModes[i] : 0;
+            int first = config.maskFirst != null && config.maskFirst.length > i ? config.maskFirst[i] : 0;
+            int last = config.maskLast != null && config.maskLast.length > i ? config.maskLast[i] : 0;
+            if (ignore != 0) {
+                insns.add(new VarInsnNode(Opcodes.ALOAD, ignoreVar));
+                pushInt(insns, i);
+                pushInt(insns, ignore);
+                insns.add(new InsnNode(Opcodes.IASTORE));
+            }
+            if (first != 0) {
+                insns.add(new VarInsnNode(Opcodes.ALOAD, maskFirstVar));
+                pushInt(insns, i);
+                pushInt(insns, first);
+                insns.add(new InsnNode(Opcodes.IASTORE));
+            }
+            if (last != 0) {
+                insns.add(new VarInsnNode(Opcodes.ALOAD, maskLastVar));
+                pushInt(insns, i);
+                pushInt(insns, last);
+                insns.add(new InsnNode(Opcodes.IASTORE));
+            }
+        }
+        return insns;
+    }
+
+    private void insertLocalSnapshotUpdates(MethodNode method, LocalLogConfig config, int snapshotVar) {
+        for (AbstractInsnNode insn = method.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn instanceof VarInsnNode) {
+                VarInsnNode varInsn = (VarInsnNode) insn;
+                if (!config.hasIndex(varInsn.var)) {
+                    continue;
+                }
+                int opcode = varInsn.getOpcode();
+                if (opcode == Opcodes.ISTORE || opcode == Opcodes.ASTORE) {
+                    InsnList update = new InsnList();
+                    update.add(new VarInsnNode(Opcodes.ALOAD, snapshotVar));
+                    pushInt(update, varInsn.var);
+                    update.add(new VarInsnNode(opcodeToLoad(opcode), varInsn.var));
+                    boxValue(update, opcodeToType(opcode));
+                    update.add(new InsnNode(Opcodes.AASTORE));
+                    method.instructions.insert(varInsn, update);
+                }
+            } else if (insn.getOpcode() == Opcodes.IINC) {
+                IincInsnNode iinc = (IincInsnNode) insn;
+                if (!config.hasIndex(iinc.var)) {
+                    continue;
+                }
+                InsnList update = new InsnList();
+                update.add(new VarInsnNode(Opcodes.ALOAD, snapshotVar));
+                pushInt(update, iinc.var);
+                update.add(new VarInsnNode(Opcodes.ILOAD, iinc.var));
+                boxValue(update, Type.INT_TYPE);
+                update.add(new InsnNode(Opcodes.AASTORE));
+                method.instructions.insert(iinc, update);
+            }
+        }
+    }
+
+    private int opcodeToLoad(int storeOpcode) {
+        switch (storeOpcode) {
+            case Opcodes.ISTORE:
+                return Opcodes.ILOAD;
+            case Opcodes.ASTORE:
+                return Opcodes.ALOAD;
+            default:
+                return Opcodes.ALOAD;
+        }
+    }
+
+    private Type opcodeToType(int storeOpcode) {
+        switch (storeOpcode) {
+            case Opcodes.ISTORE:
+                return Type.INT_TYPE;
+            case Opcodes.ASTORE:
+                return Type.getType(Object.class);
+            default:
+                return Type.getType(Object.class);
+        }
     }
 
     private String toHumanName(String internalName) {
@@ -1260,6 +1702,81 @@ public class KolobokTransformer {
         }
     }
 
+    private enum IgnoreMode {
+        NONE,
+        ALWAYS,
+        SUCCESS
+    }
+
+    private static final class ParamLogConfig {
+        private IgnoreMode ignoreMode = IgnoreMode.NONE;
+        private int maskFirst;
+        private int maskLast;
+
+        private boolean hasMask() {
+            return maskFirst > 0 || maskLast > 0;
+        }
+
+        private boolean shouldIgnore(boolean forException) {
+            if (ignoreMode == IgnoreMode.ALWAYS) {
+                return true;
+            }
+            return ignoreMode == IgnoreMode.SUCCESS && !forException;
+        }
+    }
+
+    private static final class LocalVarConfig {
+        private final int index;
+        private IgnoreMode ignoreMode = IgnoreMode.NONE;
+        private int maskFirst;
+        private int maskLast;
+
+        private LocalVarConfig(int index) {
+            this.index = index;
+        }
+    }
+
+    private static final class LocalLogConfig {
+        private final java.util.List<LocalVarConfig> entries = new java.util.ArrayList<>();
+        private final int localsSize;
+        private boolean hasAnnotations;
+        private boolean includeAllLocals;
+        private String[] names;
+        private int[] ignoreModes;
+        private int[] maskFirst;
+        private int[] maskLast;
+
+        private LocalLogConfig(int localsSize) {
+            this.localsSize = localsSize;
+        }
+
+        private LocalVarConfig findOrCreate(int index) {
+            for (LocalVarConfig entry : entries) {
+                if (entry.index == index) {
+                    return entry;
+                }
+            }
+            LocalVarConfig entry = new LocalVarConfig(index);
+            entries.add(entry);
+            return entry;
+        }
+
+        private boolean hasIndex(int index) {
+            if (index < 0 || index >= localsSize) {
+                return false;
+            }
+            if (includeAllLocals) {
+                return true;
+            }
+            for (LocalVarConfig entry : entries) {
+                if (entry.index == index) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
     private static class LogContextConfig {
         private final boolean lineHeatMap;
         private final boolean lineHeatMapOnException;
@@ -1273,11 +1790,13 @@ public class KolobokTransformer {
         private final LogFormatConfig logFormat;
         private final boolean logThreadId;
         private final boolean logThreadName;
+        private final boolean logLocals;
+        private final boolean logLocalsOnException;
 
         private LogContextConfig(boolean lineHeatMap, boolean lineHeatMapOnException, boolean subHeatMap, boolean logDuration,
                                  boolean aggregateChildren, boolean logArgs, String mask, int maxArgLength,
                                  LogLevelConfig logLevel, LogFormatConfig logFormat,
-                                 boolean logThreadId, boolean logThreadName) {
+                                 boolean logThreadId, boolean logThreadName, boolean logLocals, boolean logLocalsOnException) {
             this.lineHeatMap = lineHeatMap;
             this.lineHeatMapOnException = lineHeatMapOnException;
             this.subHeatMap = subHeatMap;
@@ -1290,6 +1809,8 @@ public class KolobokTransformer {
             this.logFormat = logFormat;
             this.logThreadId = logThreadId;
             this.logThreadName = logThreadName;
+            this.logLocals = logLocals;
+            this.logLocalsOnException = logLocalsOnException;
         }
     }
 

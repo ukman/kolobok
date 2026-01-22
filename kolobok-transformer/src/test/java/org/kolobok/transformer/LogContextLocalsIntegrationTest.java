@@ -21,11 +21,11 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-public class LogContextIntegrationTest {
+public class LogContextLocalsIntegrationTest {
 
     @Test
-    public void instrumentsAnnotatedMethod() throws Exception {
-        Path tempDir = Files.createTempDirectory("kolobok-log-it");
+    public void instrumentsLocalsOnException() throws Exception {
+        Path tempDir = Files.createTempDirectory("kolobok-log-locals");
         Path srcDir = tempDir.resolve("src");
         Path classesDir = tempDir.resolve("classes");
         Files.createDirectories(srcDir.resolve("sample"));
@@ -39,14 +39,15 @@ public class LogContextIntegrationTest {
         transformer.transformClassFile(classFile);
 
         ClassNode classNode = readClassNode(classFile);
-        MethodNode method = findMethod(classNode, "work", "(Ljava/lang/String;I)Ljava/lang/String;");
-        assertThat(method).isNotNull();
+        MethodNode work = findMethod(classNode, "work", "(Ljava/lang/String;)Ljava/lang/String;");
+        assertThat(work).isNotNull();
 
-        boolean hasDebugLog = Arrays.stream(method.instructions.toArray())
+        boolean hasLocalsJson = Arrays.stream(work.instructions.toArray())
                 .filter(node -> node instanceof MethodInsnNode)
                 .map(node -> (MethodInsnNode) node)
-                .anyMatch(node -> "org/slf4j/Logger".equals(node.owner) && "debug".equals(node.name));
-        assertThat(hasDebugLog).isTrue();
+                .anyMatch(node -> "org/kolobok/runtime/LogContextTrace".equals(node.owner)
+                        && "formatLocalsJson".equals(node.name));
+        assertThat(hasLocalsJson).isTrue();
     }
 
     private void writeSources(Path srcDir) throws IOException {
@@ -54,15 +55,21 @@ public class LogContextIntegrationTest {
                 "package sample;",
                 "",
                 "import org.kolobok.annotation.DebugLog;",
+                "import org.kolobok.annotation.DebugLog.LogFormat;",
                 "import org.slf4j.Logger;",
                 "import org.slf4j.LoggerFactory;",
                 "",
                 "public class SampleService {",
                 "    private static final Logger log = LoggerFactory.getLogger(SampleService.class);",
                 "",
-                "    @DebugLog",
-                "    public String work(String name, int count) {",
-                "        return name + count;",
+                "    @DebugLog(logLocalsOnException = true, logFormat = LogFormat.JSON)",
+                "    public String work(String input) {",
+                "        int len = input == null ? 0 : input.length();",
+                "        String tag = \"x\" + len;",
+                "        if (len == 5) {",
+                "            throw new IllegalArgumentException(\"boom\");",
+                "        }",
+                "        return tag;",
                 "    }",
                 "}",
                 ""
@@ -81,6 +88,7 @@ public class LogContextIntegrationTest {
         );
 
         List<String> options = Arrays.asList(
+                "-g",
                 "-d", classesDir.toString(),
                 "-classpath", System.getProperty("java.class.path")
         );
