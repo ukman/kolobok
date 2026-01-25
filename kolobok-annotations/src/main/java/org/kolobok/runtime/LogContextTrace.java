@@ -15,12 +15,17 @@ public final class LogContextTrace {
 
     public static Object enter(String method, boolean subHeatMap, boolean aggregateChildren, boolean logArgs,
                                String mask, int maxArgLength, Object[] args) {
+        return enter(method, "", subHeatMap, aggregateChildren, logArgs, mask, maxArgLength, args);
+    }
+
+    public static Object enter(String method, String tag, boolean subHeatMap, boolean aggregateChildren, boolean logArgs,
+                               String mask, int maxArgLength, Object[] args) {
         TraceState state = TRACE.get();
         if (state == null) {
             state = new TraceState(resolveTraceId(), subHeatMap, aggregateChildren);
             TRACE.set(state);
         }
-        TraceNode node = new TraceNode(method);
+        TraceNode node = new TraceNode(method, tag);
         node.arguments = sanitizeArgs(args, logArgs, mask, maxArgLength);
         if (!state.stack.isEmpty()) {
             state.stack.peek().children.add(node);
@@ -30,7 +35,7 @@ public final class LogContextTrace {
     }
 
     public static Object enter(String method, boolean subHeatMap, boolean aggregateChildren, Object[] args) {
-        return enter(method, subHeatMap, aggregateChildren, true, "", 200, args);
+        return enter(method, "", subHeatMap, aggregateChildren, true, "", 200, args);
     }
 
     public static String exit(Object token, int[] lines, int[] counts, long durationNs, boolean logOnException, boolean isException) {
@@ -70,6 +75,9 @@ public final class LogContextTrace {
 
     private static void appendNodeJson(StringBuilder sb, TraceNode node) {
         sb.append("\"method\":\"").append(escapeJson(node.method)).append("\",");
+        if (node.tag != null && !node.tag.isEmpty()) {
+            sb.append("\"tag\":\"").append(escapeJson(node.tag)).append("\",");
+        }
         sb.append("\"count\":").append(node.count).append(',');
         if (node.arguments != null) {
             sb.append("\"arguments\":[");
@@ -125,6 +133,56 @@ public final class LogContextTrace {
         return ",\"traceId\":\"" + escapeJson(traceId) + "\"";
     }
 
+    public static String formatHttpRequestHuman() {
+        RequestInfo info = resolveRequestInfo();
+        if (info == null || info.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(" http=");
+        if (info.method != null && !info.method.isEmpty()) {
+            sb.append(info.method);
+            if (info.path != null && !info.path.isEmpty()) {
+                sb.append(' ');
+            }
+        }
+        if (info.path != null && !info.path.isEmpty()) {
+            sb.append(info.path);
+        }
+        if (info.query != null && !info.query.isEmpty()) {
+            sb.append('?').append(info.query);
+        }
+        return sb.toString();
+    }
+
+    public static String formatHttpRequestJson() {
+        RequestInfo info = resolveRequestInfo();
+        if (info == null || info.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append(",\"http\":{");
+        boolean first = true;
+        if (info.method != null && !info.method.isEmpty()) {
+            sb.append("\"method\":\"").append(escapeJson(info.method)).append('"');
+            first = false;
+        }
+        if (info.path != null && !info.path.isEmpty()) {
+            if (!first) {
+                sb.append(',');
+            }
+            sb.append("\"path\":\"").append(escapeJson(info.path)).append('"');
+            first = false;
+        }
+        if (info.query != null && !info.query.isEmpty()) {
+            if (!first) {
+                sb.append(',');
+            }
+            sb.append("\"query\":\"").append(escapeJson(info.query)).append('"');
+        }
+        sb.append('}');
+        return sb.toString();
+    }
+
     private static String resolveTraceId() {
         String traceId = resolveFromMdc();
         return (traceId == null || traceId.isEmpty()) ? UUID.randomUUID().toString() : traceId;
@@ -135,6 +193,90 @@ public final class LogContextTrace {
             Class<?> mdcClass = Class.forName("org.slf4j.MDC");
             Method get = mdcClass.getMethod("get", String.class);
             Object value = get.invoke(null, "traceId");
+            return value == null ? null : value.toString();
+        } catch (ReflectiveOperationException ignored) {
+            return null;
+        }
+    }
+
+    private static RequestInfo resolveRequestInfo() {
+        RequestInfo info = resolveFromSpringRequest();
+        if (info != null && !info.isEmpty()) {
+            return info;
+        }
+        info = resolveFromMdcRequest();
+        if (info != null && !info.isEmpty()) {
+            return info;
+        }
+        return null;
+    }
+
+    private static RequestInfo resolveFromSpringRequest() {
+        try {
+            Class<?> holder = Class.forName("org.springframework.web.context.request.RequestContextHolder");
+            Method getRequestAttributes = holder.getMethod("getRequestAttributes");
+            Object attrs = getRequestAttributes.invoke(null);
+            if (attrs == null) {
+                return null;
+            }
+            Method getRequest = attrs.getClass().getMethod("getRequest");
+            Object request = getRequest.invoke(attrs);
+            if (request == null) {
+                return null;
+            }
+            return buildRequestInfo(request);
+        } catch (ReflectiveOperationException ignored) {
+            return null;
+        }
+    }
+
+    private static RequestInfo buildRequestInfo(Object request) {
+        String method = invokeString(request, "getMethod");
+        String path = invokeString(request, "getRequestURI");
+        String query = invokeString(request, "getQueryString");
+        if ((path == null || path.isEmpty())) {
+            String url = invokeString(request, "getRequestURL");
+            if (url != null && !url.isEmpty()) {
+                path = url;
+            }
+        }
+        if ((method == null || method.isEmpty()) && (path == null || path.isEmpty()) && (query == null || query.isEmpty())) {
+            return null;
+        }
+        return new RequestInfo(method, path, query);
+    }
+
+    private static RequestInfo resolveFromMdcRequest() {
+        String method = readMdc("http.method");
+        String path = readMdc("http.path");
+        String query = readMdc("http.query");
+        if (path == null || path.isEmpty()) {
+            String url = readMdc("http.url");
+            if (url != null && !url.isEmpty()) {
+                path = url;
+            }
+        }
+        if ((method == null || method.isEmpty()) && (path == null || path.isEmpty()) && (query == null || query.isEmpty())) {
+            return null;
+        }
+        return new RequestInfo(method, path, query);
+    }
+
+    private static String readMdc(String key) {
+        try {
+            Class<?> mdcClass = Class.forName("org.slf4j.MDC");
+            Method get = mdcClass.getMethod("get", String.class);
+            Object value = get.invoke(null, key);
+            return value == null ? null : value.toString();
+        } catch (ReflectiveOperationException ignored) {
+            return null;
+        }
+    }
+
+    private static String invokeString(Object target, String methodName) {
+        try {
+            Method method = target.getClass().getMethod(methodName);
+            Object value = method.invoke(target);
             return value == null ? null : value.toString();
         } catch (ReflectiveOperationException ignored) {
             return null;
@@ -154,6 +296,24 @@ public final class LogContextTrace {
             sb.append(c);
         }
         return sb.toString();
+    }
+
+    private static final class RequestInfo {
+        private final String method;
+        private final String path;
+        private final String query;
+
+        private RequestInfo(String method, String path, String query) {
+            this.method = method;
+            this.path = path;
+            this.query = query;
+        }
+
+        private boolean isEmpty() {
+            return (method == null || method.isEmpty())
+                    && (path == null || path.isEmpty())
+                    && (query == null || query.isEmpty());
+        }
     }
 
     private static String toJsonValue(Object value) {
@@ -209,6 +369,18 @@ public final class LogContextTrace {
         String start = truncated.substring(0, prefix);
         String end = truncated.substring(length - suffix);
         return start + "***" + end;
+    }
+
+    public static String formatResult(Object value, String mask, int maxResultLength) {
+        int limit = maxResultLength > 0 ? maxResultLength : 200;
+        MaskRange range = parseMaskRange(mask);
+        if (range.enabled) {
+            return maskValue(value, range.first, range.last, limit);
+        }
+        if (value == null) {
+            return "null";
+        }
+        return truncate(String.valueOf(value), limit);
     }
 
     public static String formatLocalsHuman(Object[] locals, String[] names, int[] ignoreModes,
@@ -302,14 +474,16 @@ public final class LogContextTrace {
 
     private static final class TraceNode {
         private final String method;
+        private final String tag;
         private final List<TraceNode> children = new ArrayList<>();
         private int count;
         private java.util.Map<Integer, Integer> lineCounts;
         private long durationNs = -1;
         private Object[] arguments;
 
-        private TraceNode(String method) {
+        private TraceNode(String method, String tag) {
             this.method = method;
+            this.tag = tag;
         }
     }
 
@@ -375,6 +549,9 @@ public final class LogContextTrace {
             sb.append("- ");
         }
         sb.append(node.method);
+        if (node.tag != null && !node.tag.isEmpty()) {
+            sb.append(" tag=").append(node.tag);
+        }
         if (depth == 0 && traceId != null && !traceId.isEmpty()) {
             sb.append(" trace=").append(traceId);
         }
@@ -490,12 +667,41 @@ public final class LogContextTrace {
         return spec;
     }
 
+    private static MaskRange parseMaskRange(String mask) {
+        if (mask == null) {
+            return new MaskRange(false, 0, 0);
+        }
+        String trimmed = mask.trim();
+        if (trimmed.isEmpty()) {
+            return new MaskRange(false, 0, 0);
+        }
+        String[] parts = trimmed.split(",");
+        if (parts.length != 2) {
+            return new MaskRange(false, 0, 0);
+        }
+        try {
+            int first = Integer.parseInt(parts[0].trim());
+            int last = Integer.parseInt(parts[1].trim());
+            if (first < 0) {
+                first = 0;
+            }
+            if (last < 0) {
+                last = 0;
+            }
+            return new MaskRange(true, first, last);
+        } catch (NumberFormatException ex) {
+            return new MaskRange(false, 0, 0);
+        }
+    }
+
     private static void aggregateNode(TraceNode node) {
         java.util.Map<String, TraceNode> aggregated = new java.util.LinkedHashMap<>();
         for (TraceNode child : node.children) {
-            TraceNode existing = aggregated.get(child.method);
+            String tag = child.tag == null ? "" : child.tag;
+            String key = child.method + "\u0000" + tag;
+            TraceNode existing = aggregated.get(key);
             if (existing == null) {
-                aggregated.put(child.method, child);
+                aggregated.put(key, child);
             } else {
                 existing.count += child.count;
                 existing.durationNs += child.durationNs;
@@ -566,5 +772,17 @@ public final class LogContextTrace {
     private static final class MaskSpec {
         private final java.util.Set<Integer> indexes = new java.util.HashSet<>();
         private boolean maskAll;
+    }
+
+    private static final class MaskRange {
+        private final boolean enabled;
+        private final int first;
+        private final int last;
+
+        private MaskRange(boolean enabled, int first, int last) {
+            this.enabled = enabled;
+            this.first = first;
+            this.last = last;
+        }
     }
 }

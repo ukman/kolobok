@@ -64,6 +64,10 @@ public class KolobokMavenMojo extends AbstractMojo {
         @Parameter
         private Integer maxArgLength;
         @Parameter
+        private String resultMask;
+        @Parameter
+        private Integer maxResultLength;
+        @Parameter
         private String logLevel;
         @Parameter
         private String logFormat;
@@ -71,6 +75,12 @@ public class KolobokMavenMojo extends AbstractMojo {
         private Boolean logThreadId;
         @Parameter
         private Boolean logThreadName;
+        @Parameter
+        private Boolean logHttpRequest;
+        @Parameter
+        private String tag;
+        @Parameter
+        private Long slowThresholdMs;
         @Parameter
         private Boolean logLocals;
         @Parameter
@@ -86,6 +96,8 @@ public class KolobokMavenMojo extends AbstractMojo {
             defaults.setLogArgs(logArgs);
             defaults.setMask(mask);
             defaults.setMaxArgLength(maxArgLength);
+            defaults.setResultMask(resultMask);
+            defaults.setMaxResultLength(maxResultLength);
             if (logLevel != null) {
                 defaults.setLogLevel(parseEnum(DebugLog.LogLevel.class, logLevel));
             }
@@ -94,6 +106,9 @@ public class KolobokMavenMojo extends AbstractMojo {
             }
             defaults.setLogThreadId(logThreadId);
             defaults.setLogThreadName(logThreadName);
+            defaults.setLogHttpRequest(logHttpRequest);
+            defaults.setTag(tag);
+            defaults.setSlowThresholdMs(slowThresholdMs);
             defaults.setLogLocals(logLocals);
             defaults.setLogLocalsOnException(logLocalsOnException);
             return defaults;

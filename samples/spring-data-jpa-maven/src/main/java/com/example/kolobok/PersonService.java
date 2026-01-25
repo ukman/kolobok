@@ -49,7 +49,7 @@ public class PersonService {
         repository.deleteById(id);
     }
 
-    @DebugLog(lineHeatMap = true, subHeatMap=true, logDuration = true, logLocalsOnException = true)
+    @DebugLog(lineHeatMap = true, subHeatMap=true, logDuration = true, logLocalsOnException = true, logHttpRequest = true, tag = "persons")
     public List<Person> search(String firstName, String lastName, String title) {
         log.info("Searching for persons with firstName: {}, lastName: {}, title: {}", firstName, lastName, title);
         List<Person> res;
@@ -67,7 +67,7 @@ public class PersonService {
         return res;
     }
 
-    @DebugLog(lineHeatMap = true, subHeatMap=true, logDuration = true)
+    @DebugLog(lineHeatMap = true, subHeatMap=true, logDuration = true, logHttpRequest = true)
     public Person findById(Long id) {
         Person res = repository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Person not found"));

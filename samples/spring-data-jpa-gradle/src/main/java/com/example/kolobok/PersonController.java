@@ -58,7 +58,7 @@ public class PersonController {
 
     @Operation(summary = "Search persons by optional firstName/lastName/title")
     @GetMapping("/search")
-    @DebugLog(lineHeatMap = true)
+    @DebugLog(lineHeatMap = true, logHttpRequest = true, tag = "persons")
     public List<Person> search(
             @Parameter(description = "First name") @RequestParam(required = false) String firstName,
             @Parameter(description = "Last name") @RequestParam(required = false) String lastName,

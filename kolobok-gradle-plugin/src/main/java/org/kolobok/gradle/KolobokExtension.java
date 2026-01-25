@@ -21,10 +21,15 @@ public class KolobokExtension {
         private Boolean logArgs;
         private String mask;
         private Integer maxArgLength;
+        private String resultMask;
+        private Integer maxResultLength;
         private String logLevel;
         private String logFormat;
         private Boolean logThreadId;
         private Boolean logThreadName;
+        private Boolean logHttpRequest;
+        private String tag;
+        private Long slowThresholdMs;
         private Boolean logLocals;
         private Boolean logLocalsOnException;
 
@@ -38,6 +43,8 @@ public class KolobokExtension {
             defaults.setLogArgs(logArgs);
             defaults.setMask(mask);
             defaults.setMaxArgLength(maxArgLength);
+            defaults.setResultMask(resultMask);
+            defaults.setMaxResultLength(maxResultLength);
             if (logLevel != null) {
                 defaults.setLogLevel(parseEnum(DebugLog.LogLevel.class, logLevel));
             }
@@ -46,6 +53,9 @@ public class KolobokExtension {
             }
             defaults.setLogThreadId(logThreadId);
             defaults.setLogThreadName(logThreadName);
+            defaults.setLogHttpRequest(logHttpRequest);
+            defaults.setTag(tag);
+            defaults.setSlowThresholdMs(slowThresholdMs);
             defaults.setLogLocals(logLocals);
             defaults.setLogLocalsOnException(logLocalsOnException);
             return defaults;
@@ -119,6 +129,22 @@ public class KolobokExtension {
             this.maxArgLength = maxArgLength;
         }
 
+        public String getResultMask() {
+            return resultMask;
+        }
+
+        public void setResultMask(String resultMask) {
+            this.resultMask = resultMask;
+        }
+
+        public Integer getMaxResultLength() {
+            return maxResultLength;
+        }
+
+        public void setMaxResultLength(Integer maxResultLength) {
+            this.maxResultLength = maxResultLength;
+        }
+
         public String getLogLevel() {
             return logLevel;
         }
@@ -149,6 +175,30 @@ public class KolobokExtension {
 
         public void setLogThreadName(Boolean logThreadName) {
             this.logThreadName = logThreadName;
+        }
+
+        public Boolean getLogHttpRequest() {
+            return logHttpRequest;
+        }
+
+        public void setLogHttpRequest(Boolean logHttpRequest) {
+            this.logHttpRequest = logHttpRequest;
+        }
+
+        public String getTag() {
+            return tag;
+        }
+
+        public void setTag(String tag) {
+            this.tag = tag;
+        }
+
+        public Long getSlowThresholdMs() {
+            return slowThresholdMs;
+        }
+
+        public void setSlowThresholdMs(Long slowThresholdMs) {
+            this.slowThresholdMs = slowThresholdMs;
         }
 
         public Boolean getLogLocals() {

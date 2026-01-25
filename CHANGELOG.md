@@ -2,12 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## 0.2.4
+## 0.2.5
 - Global DebugLog defaults via plugin config and ENV/JVM properties (annotation > plugin > env/sys > built-in).
 - Added Gradle `kolobok { debugLogDefaults { ... } }` configuration.
 - Added Maven `<debugLogDefaults>` configuration.
 - New unit tests for locals logging (JSON/HUMAN).
 - Switched log prefix to `[KLB]`.
+- Added `resultMask`/`maxResultLength` for return-value masking/truncation and unified `@DebugLogMask(mask="2,4")` style.
 - Synced Maven/Gradle samples (DebugLog usage, Lombok, logging config).
 - Transformer now compiles against annotations module (compile-scope dependency).
 

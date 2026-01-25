@@ -83,10 +83,41 @@ Optional flags:
 - `logArgs` toggles argument logging (default: true).
 - `mask` hides selected arguments by index (e.g. `"0,2-3"` or `"*"`).
 - `maxArgLength` caps stringified arguments (default: 200).
+- `resultMask` masks the return value using `first,last` format (e.g. `"2,4"`).
+- `maxResultLength` caps stringified return values (default: same as `maxArgLength`).
 - `logLevel` controls log level for entry/exit/heat map (`TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`).
 - `logFormat` controls log format for entry/exit/heat map (`HUMAN` or `JSON`, default: `HUMAN`).
 - `logThreadId` adds `threadId` (default: false).
 - `logThreadName` adds `threadName` (default: false).
+- `logHttpRequest` adds HTTP request info if available (best-effort, default: false).
+  Uses Spring `RequestContextHolder` when present, otherwise falls back to MDC keys `http.method`, `http.path`, `http.query` or `http.url`.
+- `tag` adds a static tag to logs (useful for filtering).
+- `slowThresholdMs` logs only slow executions (entry logs are suppressed; exit/heatmap logs emitted when duration >= threshold; errors always log).
+
+Example for Dropwizard/Jersey (JAX-RS) using MDC (framework-specific):
+
+```java
+import org.slf4j.MDC;
+
+import javax.ws.rs.container.ContainerRequestContext;
+import javax.ws.rs.container.ContainerRequestFilter;
+import javax.ws.rs.ext.Provider;
+import java.io.IOException;
+
+@Provider
+public class MdcRequestFilter implements ContainerRequestFilter {
+    @Override
+    public void filter(ContainerRequestContext requestContext) throws IOException {
+        String method = requestContext.getMethod();
+        String path = requestContext.getUriInfo().getPath();
+        String query = requestContext.getUriInfo().getRequestUri().getQuery();
+
+        if (method != null) MDC.put("http.method", method);
+        if (path != null) MDC.put("http.path", path);
+        if (query != null) MDC.put("http.query", query);
+    }
+}
+```
 
 ```java
 import org.kolobok.annotation.DebugLog;
@@ -96,7 +127,7 @@ import org.slf4j.LoggerFactory;
 public class SampleService {
     private static final Logger log = LoggerFactory.getLogger(SampleService.class);
 
-    @DebugLog(lineHeatMap = true, logDuration = true)
+    @DebugLog(lineHeatMap = true, logDuration = true, logHttpRequest = true)
     public String work(String name, int count) {
         return name + count;
     }
@@ -153,7 +184,8 @@ KLB_DEBUGLOG_MAX_ARG_LENGTH=500
 
 Supported keys (system/env):
 `lineHeatMap`, `lineHeatMapOnException`, `subHeatMap`, `logDuration`, `aggregateChildren`, `logArgs`,
-`mask`, `maxArgLength`, `logLevel`, `logFormat`, `logThreadId`, `logThreadName`, `logLocals`, `logLocalsOnException`.
+`mask`, `maxArgLength`, `resultMask`, `maxResultLength`, `logLevel`, `logFormat`, `logThreadId`,
+`logThreadName`, `logHttpRequest`, `tag`, `slowThresholdMs`, `logLocals`, `logLocalsOnException`.
 
 Maven:
 ```xml
@@ -162,12 +194,17 @@ Maven:
     <plugin>
       <groupId>com.github.ukman</groupId>
       <artifactId>kolobok-maven-plugin</artifactId>
-      <version>0.2.4</version>
+      <version>0.2.5</version>
       <configuration>
         <debugLogDefaults>
+          <tag>billing</tag>
+          <slowThresholdMs>50</slowThresholdMs>
           <logLocals>true</logLocals>
           <logFormat>JSON</logFormat>
+          <logHttpRequest>true</logHttpRequest>
           <maxArgLength>500</maxArgLength>
+          <maxResultLength>500</maxResultLength>
+          <resultMask>2,4</resultMask>
         </debugLogDefaults>
       </configuration>
     </plugin>
@@ -179,9 +216,14 @@ Gradle:
 ```gradle
 kolobok {
     debugLogDefaults {
+        tag = "billing"
+        slowThresholdMs = 50
         logLocals = true
         logFormat = "JSON"
+        logHttpRequest = true
         maxArgLength = 500
+        maxResultLength = 500
+        resultMask = "2,4"
     }
 }
 ```
@@ -209,6 +251,8 @@ Parameter impact:
 - `logArgs`: can be expensive if arguments are large or have heavy `toString`.
 - `mask`: small overhead; applied during argument formatting.
 - `maxArgLength`: reduces string size and memory usage; slight processing cost.
+- `resultMask`: masks return values; same cost profile as `mask`.
+- `maxResultLength`: reduces return value size; same cost profile as `maxArgLength`.
 - `logFormat`: JSON is usually heavier than HUMAN (escaping/formatting).
 - `logThreadId`/`logThreadName`: minimal overhead.
 - `logLevel`: if logging level is disabled, most work is skipped early.
@@ -225,10 +269,10 @@ import org.kolobok.annotation.DebugLogMask;
 
 @DebugLog
 void doPost(@DebugLogIgnore String cardNumber,
-            @DebugLogMask(first = 2, last = 4) String passport) {
+            @DebugLogMask(mask = "2,4") String passport) {
     @DebugLogIgnore(mode = DebugLogIgnore.Mode.SUCCESS)
     String tmp = loadTemp();
-    @DebugLogMask(first = 2, last = 4)
+    @DebugLogMask(mask = "2,4")
     String secret = readSecret();
     // ...
 }
@@ -237,7 +281,7 @@ void doPost(@DebugLogIgnore String cardNumber,
 Notes:
 - `@DebugLogIgnore` hides the value completely.
 - `@DebugLogIgnore(mode = SUCCESS)` hides the value on success, but shows it on exceptions.
-- `@DebugLogMask(first,last)` prints only the first/last characters, masking the middle.
+- `@DebugLogMask(mask = "first,last")` prints only the first/last characters, masking the middle.
 - Local-variable annotations require debug symbols (`-g`) and are best-effort (based on local variable tables).
 - Local-variable capture currently tracks `int` and reference types; other primitives are ignored.
 
@@ -255,7 +299,7 @@ Or in `pom.xml`:
     <plugin>
       <groupId>com.github.ukman</groupId>
       <artifactId>kolobok-maven-plugin</artifactId>
-      <version>0.2.4</version>
+      <version>0.2.5</version>
       <configuration>
         <skip>true</skip>
       </configuration>
@@ -273,7 +317,7 @@ Or using a `prod` profile:
         <plugin>
           <groupId>com.github.ukman</groupId>
           <artifactId>kolobok-maven-plugin</artifactId>
-          <version>0.2.4</version>
+          <version>0.2.5</version>
           <configuration>
             <skip>true</skip>
           </configuration>
@@ -311,7 +355,7 @@ Maven:
   <dependency>
     <groupId>com.github.ukman</groupId>
     <artifactId>kolobok</artifactId>
-    <version>0.2.4</version>
+    <version>0.2.5</version>
     <scope>provided</scope>
   </dependency>
 
@@ -320,7 +364,7 @@ Maven:
       <plugin>
         <groupId>com.github.ukman</groupId>
         <artifactId>kolobok-maven-plugin</artifactId>
-        <version>0.2.4</version>
+        <version>0.2.5</version>
         <executions>
           <execution>
             <goals>
@@ -336,12 +380,12 @@ Maven:
 Gradle:
 ```gradle
 dependencies {
-    compileOnly 'com.github.ukman:kolobok:0.2.4'
+    compileOnly 'com.github.ukman:kolobok:0.2.5'
 }
 
 buildscript {
     dependencies {
-        classpath 'com.github.ukman:kolobok-gradle-plugin:0.2.4'
+        classpath 'com.github.ukman:kolobok-gradle-plugin:0.2.5'
     }
 }
 

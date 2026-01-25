@@ -16,10 +16,15 @@ public @interface DebugLog {
     boolean logArgs() default true;
     String mask() default "";
     int maxArgLength() default 200;
+    String resultMask() default "";
+    int maxResultLength() default -1;
     LogLevel logLevel() default LogLevel.DEBUG;
     LogFormat logFormat() default LogFormat.HUMAN;
     boolean logThreadId() default false;
     boolean logThreadName() default false;
+    boolean logHttpRequest() default false;
+    String tag() default "";
+    long slowThresholdMs() default 0;
     boolean logLocals() default false;
     boolean logLocalsOnException() default false;
 
