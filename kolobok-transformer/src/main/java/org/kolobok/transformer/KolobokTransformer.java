@@ -26,6 +26,13 @@ import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.TryCatchBlockNode;
 import org.objectweb.asm.tree.TypeInsnNode;
 import org.objectweb.asm.tree.VarInsnNode;
+import org.objectweb.asm.tree.analysis.Analyzer;
+import org.objectweb.asm.tree.analysis.AnalyzerException;
+import org.objectweb.asm.tree.analysis.BasicInterpreter;
+import org.objectweb.asm.tree.analysis.BasicValue;
+import org.objectweb.asm.tree.analysis.Frame;
+import org.objectweb.asm.tree.analysis.SourceInterpreter;
+import org.objectweb.asm.tree.analysis.SourceValue;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -45,6 +52,7 @@ public class KolobokTransformer {
     public static final String DEBUG_LOG_DESC = "Lorg/kolobok/annotation/DebugLog;";
     public static final String DEBUG_LOG_IGNORE_DESC = "Lorg/kolobok/annotation/DebugLogIgnore;";
     public static final String DEBUG_LOG_MASK_DESC = "Lorg/kolobok/annotation/DebugLogMask;";
+    public static final String SAFE_CALL_DESC = "Lorg/kolobok/annotation/SafeCall;";
     private static final String SLF4J_LOGGER_DESC = "Lorg/slf4j/Logger;";
     private static final String[] LOGGER_FIELD_NAMES = {"log", "logger", "LOG", "LOGGER"};
     private final DebugLogDefaults defaults;
@@ -84,6 +92,7 @@ public class KolobokTransformer {
             modified = transformInterface(classNode);
         } else {
             modified = transformLogContext(classNode);
+            modified = transformSafeCall(classNode) || modified;
         }
         if (!modified) {
             return;
@@ -163,6 +172,64 @@ public class KolobokTransformer {
         return true;
     }
 
+    private boolean transformSafeCall(ClassNode classNode) {
+        Set<String> safeFields = new HashSet<>();
+        for (FieldNode field : classNode.fields) {
+            if (hasAnnotation(field, SAFE_CALL_DESC)) {
+                safeFields.add(field.name);
+            }
+        }
+
+        boolean modified = false;
+        for (MethodNode method : classNode.methods) {
+            if (method.instructions == null || method.instructions.size() == 0) {
+                continue;
+            }
+            if ((method.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0) {
+                continue;
+            }
+            if (!hasSafeCallUsage(method) && safeFields.isEmpty()) {
+                continue;
+            }
+            modified |= instrumentSafeCalls(classNode, method, safeFields);
+        }
+        return modified;
+    }
+
+    private boolean hasSafeCallUsage(MethodNode method) {
+        List<AnnotationNode>[] visible = method.visibleParameterAnnotations;
+        List<AnnotationNode>[] invisible = method.invisibleParameterAnnotations;
+        if (visible != null) {
+            for (List<AnnotationNode> list : visible) {
+                if (hasAnnotation(list, SAFE_CALL_DESC)) {
+                    return true;
+                }
+            }
+        }
+        if (invisible != null) {
+            for (List<AnnotationNode> list : invisible) {
+                if (hasAnnotation(list, SAFE_CALL_DESC)) {
+                    return true;
+                }
+            }
+        }
+        if (method.visibleLocalVariableAnnotations != null) {
+            for (LocalVariableAnnotationNode annotation : method.visibleLocalVariableAnnotations) {
+                if (SAFE_CALL_DESC.equals(annotation.desc)) {
+                    return true;
+                }
+            }
+        }
+        if (method.invisibleLocalVariableAnnotations != null) {
+            for (LocalVariableAnnotationNode annotation : method.invisibleLocalVariableAnnotations) {
+                if (SAFE_CALL_DESC.equals(annotation.desc)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private boolean shouldInstrumentMethod(MethodNode method) {
         if ((method.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0) {
             return false;
@@ -177,6 +244,464 @@ public class KolobokTransformer {
             return false;
         }
         return true;
+    }
+
+    private boolean instrumentSafeCalls(ClassNode classNode, MethodNode method, Set<String> safeFields) {
+        boolean isStatic = (method.access & Opcodes.ACC_STATIC) != 0;
+        Type[] argTypes = Type.getArgumentTypes(method.desc);
+        int[] argIndexes = computeArgIndexes(isStatic, argTypes);
+
+        Set<Integer> safeLocalIndexes = new HashSet<>();
+        Set<Integer> annotatedLocalIndexes = new HashSet<>();
+        List<AnnotationNode>[] visibleParams = method.visibleParameterAnnotations;
+        List<AnnotationNode>[] invisibleParams = method.invisibleParameterAnnotations;
+        for (int i = 0; i < argTypes.length; i++) {
+            if (hasAnnotation(visibleParams, i, SAFE_CALL_DESC) || hasAnnotation(invisibleParams, i, SAFE_CALL_DESC)) {
+                if (argTypes[i].getSort() != Type.OBJECT && argTypes[i].getSort() != Type.ARRAY) {
+                    continue;
+                }
+                safeLocalIndexes.add(argIndexes[i]);
+            }
+        }
+        if (method.visibleLocalVariableAnnotations != null) {
+            for (LocalVariableAnnotationNode annotation : method.visibleLocalVariableAnnotations) {
+                if (SAFE_CALL_DESC.equals(annotation.desc)) {
+                    for (int index : annotation.index) {
+                        annotatedLocalIndexes.add(index);
+                    }
+                }
+            }
+        }
+        if (method.invisibleLocalVariableAnnotations != null) {
+            for (LocalVariableAnnotationNode annotation : method.invisibleLocalVariableAnnotations) {
+                if (SAFE_CALL_DESC.equals(annotation.desc)) {
+                    for (int index : annotation.index) {
+                        annotatedLocalIndexes.add(index);
+                    }
+                }
+            }
+        }
+
+        if (safeLocalIndexes.isEmpty() && annotatedLocalIndexes.isEmpty() && safeFields.isEmpty()) {
+            return false;
+        }
+
+        Frame<BasicValue>[] safeFrames = analyzeSafeFrames(classNode, method, safeLocalIndexes);
+        Frame<SourceValue>[] sourceFrames = analyzeSourceFrames(classNode, method);
+        if (safeFrames == null || sourceFrames == null) {
+            return false;
+        }
+
+        AbstractInsnNode[] insns = method.instructions.toArray();
+        Map<AbstractInsnNode, Integer> insnIndex = new HashMap<>();
+        for (int i = 0; i < insns.length; i++) {
+            insnIndex.put(insns[i], i);
+        }
+
+        Set<AbstractInsnNode> forcedSafe = collectForcedSafeInsns(classNode, method, safeFields, sourceFrames, insnIndex);
+        forcedSafe.addAll(collectForcedSafeLocalInitInsns(method, annotatedLocalIndexes, sourceFrames, insnIndex));
+        List<AbstractInsnNode> targets = new ArrayList<>();
+
+        for (int i = 0; i < insns.length; i++) {
+            AbstractInsnNode insn = insns[i];
+            if (insn instanceof MethodInsnNode) {
+                MethodInsnNode call = (MethodInsnNode) insn;
+                if (call.getOpcode() == Opcodes.INVOKESTATIC || "<init>".equals(call.name)) {
+                    continue;
+                }
+                boolean safeReceiver = isSafeReceiver(call, safeFrames[i]);
+                if (safeReceiver || forcedSafe.contains(call)) {
+                    targets.add(call);
+                }
+            } else if (insn instanceof FieldInsnNode) {
+                FieldInsnNode fieldInsn = (FieldInsnNode) insn;
+                if (fieldInsn.getOpcode() != Opcodes.GETFIELD) {
+                    continue;
+                }
+                boolean safeReceiver = isSafeReceiver(fieldInsn, safeFrames[i]);
+                if (safeReceiver || forcedSafe.contains(fieldInsn)) {
+                    targets.add(fieldInsn);
+                }
+            }
+        }
+
+        if (targets.isEmpty()) {
+            return false;
+        }
+
+        int nextLocal = method.maxLocals;
+        for (AbstractInsnNode insn : targets) {
+            if (insn instanceof MethodInsnNode) {
+                MethodInsnNode call = (MethodInsnNode) insn;
+                int needed = tempSlotsForCall(call);
+                int base = nextLocal;
+                nextLocal += needed;
+                InsnList replacement = buildSafeCallForInvoke(call, base);
+                method.instructions.insertBefore(insn, replacement);
+                method.instructions.remove(insn);
+            } else if (insn instanceof FieldInsnNode) {
+                FieldInsnNode fieldInsn = (FieldInsnNode) insn;
+                int base = nextLocal;
+                nextLocal += 1;
+                InsnList replacement = buildSafeCallForGetField(fieldInsn, base);
+                method.instructions.insertBefore(insn, replacement);
+                method.instructions.remove(insn);
+            }
+        }
+        method.maxLocals = Math.max(method.maxLocals, nextLocal);
+        return true;
+    }
+
+    private Frame<BasicValue>[] analyzeSafeFrames(ClassNode classNode, MethodNode method, Set<Integer> safeLocals) {
+        try {
+            Analyzer<BasicValue> analyzer = new Analyzer<>(new SafeInterpreter(safeLocals));
+            return analyzer.analyze(classNode.name, method);
+        } catch (AnalyzerException ex) {
+            return null;
+        }
+    }
+
+    private Frame<SourceValue>[] analyzeSourceFrames(ClassNode classNode, MethodNode method) {
+        try {
+            Analyzer<SourceValue> analyzer = new Analyzer<>(new SourceInterpreter());
+            return analyzer.analyze(classNode.name, method);
+        } catch (AnalyzerException ex) {
+            return null;
+        }
+    }
+
+    private Set<AbstractInsnNode> collectForcedSafeInsns(ClassNode classNode, MethodNode method, Set<String> safeFields,
+                                                         Frame<SourceValue>[] sourceFrames, Map<AbstractInsnNode, Integer> insnIndex) {
+        Set<AbstractInsnNode> forced = new HashSet<>();
+        if (safeFields.isEmpty()) {
+            return forced;
+        }
+        AbstractInsnNode[] insns = method.instructions.toArray();
+        for (int i = 0; i < insns.length; i++) {
+            AbstractInsnNode insn = insns[i];
+            if (!(insn instanceof FieldInsnNode)) {
+                continue;
+            }
+            FieldInsnNode fieldInsn = (FieldInsnNode) insn;
+            if (fieldInsn.getOpcode() != Opcodes.PUTFIELD && fieldInsn.getOpcode() != Opcodes.PUTSTATIC) {
+                continue;
+            }
+            if (!classNode.name.equals(fieldInsn.owner)) {
+                continue;
+            }
+            if (!safeFields.contains(fieldInsn.name)) {
+                continue;
+            }
+            Frame<SourceValue> frame = sourceFrames[i];
+            if (frame == null || frame.getStackSize() == 0) {
+                continue;
+            }
+            SourceValue value = frame.getStack(frame.getStackSize() - 1);
+            collectChainSources(value, sourceFrames, insnIndex, forced, new HashSet<>());
+        }
+        return forced;
+    }
+
+    private Set<AbstractInsnNode> collectForcedSafeLocalInitInsns(MethodNode method, Set<Integer> annotatedLocalIndexes,
+                                                                  Frame<SourceValue>[] sourceFrames,
+                                                                  Map<AbstractInsnNode, Integer> insnIndex) {
+        Set<AbstractInsnNode> forced = new HashSet<>();
+        if (annotatedLocalIndexes.isEmpty()) {
+            return forced;
+        }
+        AbstractInsnNode[] insns = method.instructions.toArray();
+        for (int i = 0; i < insns.length; i++) {
+            AbstractInsnNode insn = insns[i];
+            if (!(insn instanceof VarInsnNode)) {
+                continue;
+            }
+            VarInsnNode varInsn = (VarInsnNode) insn;
+            int opcode = varInsn.getOpcode();
+            if (opcode != Opcodes.ISTORE && opcode != Opcodes.LSTORE && opcode != Opcodes.FSTORE
+                    && opcode != Opcodes.DSTORE && opcode != Opcodes.ASTORE) {
+                continue;
+            }
+            if (!annotatedLocalIndexes.contains(varInsn.var)) {
+                continue;
+            }
+            Frame<SourceValue> frame = sourceFrames[i];
+            if (frame == null || frame.getStackSize() == 0) {
+                continue;
+            }
+            SourceValue value = frame.getStack(frame.getStackSize() - 1);
+            collectChainSources(value, sourceFrames, insnIndex, forced, new HashSet<>());
+        }
+        return forced;
+    }
+
+    private void collectChainSources(SourceValue value, Frame<SourceValue>[] frames,
+                                     Map<AbstractInsnNode, Integer> insnIndex, Set<AbstractInsnNode> forced,
+                                     Set<AbstractInsnNode> visited) {
+        if (value == null || value.insns == null) {
+            return;
+        }
+        for (AbstractInsnNode insn : value.insns) {
+            if (!visited.add(insn)) {
+                continue;
+            }
+            if (insn instanceof MethodInsnNode) {
+                MethodInsnNode call = (MethodInsnNode) insn;
+                if (call.getOpcode() == Opcodes.INVOKESTATIC || "<init>".equals(call.name)) {
+                    continue;
+                }
+                forced.add(call);
+                SourceValue receiver = resolveReceiver(insn, frames, insnIndex);
+                collectChainSources(receiver, frames, insnIndex, forced, visited);
+            } else if (insn instanceof FieldInsnNode) {
+                FieldInsnNode fieldInsn = (FieldInsnNode) insn;
+                if (fieldInsn.getOpcode() != Opcodes.GETFIELD) {
+                    continue;
+                }
+                forced.add(fieldInsn);
+                SourceValue receiver = resolveReceiver(insn, frames, insnIndex);
+                collectChainSources(receiver, frames, insnIndex, forced, visited);
+            }
+        }
+    }
+
+    private SourceValue resolveReceiver(AbstractInsnNode insn, Frame<SourceValue>[] frames,
+                                        Map<AbstractInsnNode, Integer> insnIndex) {
+        Integer idx = insnIndex.get(insn);
+        if (idx == null) {
+            return null;
+        }
+        Frame<SourceValue> frame = frames[idx];
+        if (frame == null) {
+            return null;
+        }
+        int stackSize = frame.getStackSize();
+        if (insn instanceof MethodInsnNode) {
+            MethodInsnNode call = (MethodInsnNode) insn;
+            Type[] args = Type.getArgumentTypes(call.desc);
+            int receiverIndex = stackSize - args.length - 1;
+            if (receiverIndex < 0 || receiverIndex >= stackSize) {
+                return null;
+            }
+            return frame.getStack(receiverIndex);
+        }
+        if (insn instanceof FieldInsnNode) {
+            int receiverIndex = stackSize - 1;
+            if (receiverIndex < 0) {
+                return null;
+            }
+            return frame.getStack(receiverIndex);
+        }
+        return null;
+    }
+
+    private boolean isSafeReceiver(MethodInsnNode call, Frame<BasicValue> frame) {
+        if (frame == null) {
+            return false;
+        }
+        Type[] args = Type.getArgumentTypes(call.desc);
+        int receiverIndex = frame.getStackSize() - args.length - 1;
+        if (receiverIndex < 0 || receiverIndex >= frame.getStackSize()) {
+            return false;
+        }
+        BasicValue value = frame.getStack(receiverIndex);
+        return value instanceof SafeValue && ((SafeValue) value).safe;
+    }
+
+    private boolean isSafeReceiver(FieldInsnNode fieldInsn, Frame<BasicValue> frame) {
+        if (frame == null) {
+            return false;
+        }
+        int receiverIndex = frame.getStackSize() - 1;
+        if (receiverIndex < 0) {
+            return false;
+        }
+        BasicValue value = frame.getStack(receiverIndex);
+        return value instanceof SafeValue && ((SafeValue) value).safe;
+    }
+
+    private int tempSlotsForCall(MethodInsnNode call) {
+        int slots = 1;
+        for (Type type : Type.getArgumentTypes(call.desc)) {
+            slots += type.getSize();
+        }
+        return slots;
+    }
+
+    private InsnList buildSafeCallForInvoke(MethodInsnNode call, int baseLocal) {
+        InsnList insns = new InsnList();
+        Type[] args = Type.getArgumentTypes(call.desc);
+        Type returnType = Type.getReturnType(call.desc);
+
+        int[] argLocals = new int[args.length];
+        int offset = baseLocal;
+        for (int i = args.length - 1; i >= 0; i--) {
+            Type argType = args[i];
+            offset += argType.getSize();
+            argLocals[i] = offset - argType.getSize();
+            insns.add(new VarInsnNode(argType.getOpcode(Opcodes.ISTORE), argLocals[i]));
+        }
+        int recvLocal = baseLocal + (offset - baseLocal);
+        insns.add(new VarInsnNode(Opcodes.ASTORE, recvLocal));
+
+        LabelNode nonNull = new LabelNode();
+        LabelNode end = new LabelNode();
+        insns.add(new VarInsnNode(Opcodes.ALOAD, recvLocal));
+        insns.add(new JumpInsnNode(Opcodes.IFNONNULL, nonNull));
+        if (returnType.getSort() != Type.VOID) {
+            pushDefaultValue(insns, returnType);
+        }
+        insns.add(new JumpInsnNode(Opcodes.GOTO, end));
+        insns.add(nonNull);
+        insns.add(new VarInsnNode(Opcodes.ALOAD, recvLocal));
+        for (int i = 0; i < args.length; i++) {
+            Type argType = args[i];
+            insns.add(new VarInsnNode(argType.getOpcode(Opcodes.ILOAD), argLocals[i]));
+        }
+        insns.add(new MethodInsnNode(call.getOpcode(), call.owner, call.name, call.desc, call.itf));
+        insns.add(end);
+        return insns;
+    }
+
+    private InsnList buildSafeCallForGetField(FieldInsnNode fieldInsn, int recvLocal) {
+        InsnList insns = new InsnList();
+        Type fieldType = Type.getType(fieldInsn.desc);
+        LabelNode nonNull = new LabelNode();
+        LabelNode end = new LabelNode();
+        insns.add(new VarInsnNode(Opcodes.ASTORE, recvLocal));
+        insns.add(new VarInsnNode(Opcodes.ALOAD, recvLocal));
+        insns.add(new JumpInsnNode(Opcodes.IFNONNULL, nonNull));
+        pushDefaultValue(insns, fieldType);
+        insns.add(new JumpInsnNode(Opcodes.GOTO, end));
+        insns.add(nonNull);
+        insns.add(new VarInsnNode(Opcodes.ALOAD, recvLocal));
+        insns.add(new FieldInsnNode(fieldInsn.getOpcode(), fieldInsn.owner, fieldInsn.name, fieldInsn.desc));
+        insns.add(end);
+        return insns;
+    }
+
+    private void pushDefaultValue(InsnList insns, Type type) {
+        if (type.getSort() == Type.OBJECT && "java/util/Optional".equals(type.getInternalName())) {
+            insns.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/util/Optional", "empty",
+                    "()Ljava/util/Optional;", false));
+            return;
+        }
+        switch (type.getSort()) {
+            case Type.VOID:
+                return;
+            case Type.BOOLEAN:
+            case Type.BYTE:
+            case Type.CHAR:
+            case Type.SHORT:
+            case Type.INT:
+                insns.add(new InsnNode(Opcodes.ICONST_0));
+                return;
+            case Type.FLOAT:
+                insns.add(new InsnNode(Opcodes.FCONST_0));
+                return;
+            case Type.LONG:
+                insns.add(new InsnNode(Opcodes.LCONST_0));
+                return;
+            case Type.DOUBLE:
+                insns.add(new InsnNode(Opcodes.DCONST_0));
+                return;
+            default:
+                insns.add(new InsnNode(Opcodes.ACONST_NULL));
+        }
+    }
+
+    private static final class SafeValue extends BasicValue {
+        private final boolean safe;
+
+        private SafeValue(Type type, boolean safe) {
+            super(type);
+            this.safe = safe;
+        }
+    }
+
+    private static final class SafeInterpreter extends BasicInterpreter {
+        private final Set<Integer> safeLocals;
+
+        private SafeInterpreter(Set<Integer> safeLocals) {
+            super(Opcodes.ASM9);
+            this.safeLocals = safeLocals;
+        }
+
+        private SafeValue wrap(BasicValue value, boolean safe) {
+            if (value == null) {
+                return null;
+            }
+            return new SafeValue(value.getType(), safe);
+        }
+
+        @Override
+        public BasicValue newValue(Type type) {
+            BasicValue value = super.newValue(type);
+            return wrap(value, false);
+        }
+
+        @Override
+        public BasicValue newOperation(AbstractInsnNode insn) throws AnalyzerException {
+            BasicValue value = (BasicValue) super.newOperation(insn);
+            return wrap(value, false);
+        }
+
+        @Override
+        public BasicValue copyOperation(AbstractInsnNode insn, BasicValue value) throws AnalyzerException {
+            BasicValue result = (BasicValue) super.copyOperation(insn, value);
+            boolean safe = value instanceof SafeValue && ((SafeValue) value).safe;
+            if (insn instanceof VarInsnNode && insn.getOpcode() == Opcodes.ALOAD) {
+                int index = ((VarInsnNode) insn).var;
+                safe = safe || safeLocals.contains(index);
+            }
+            return wrap(result, safe);
+        }
+
+        @Override
+        public BasicValue unaryOperation(AbstractInsnNode insn, BasicValue value) throws AnalyzerException {
+            BasicValue result = (BasicValue) super.unaryOperation(insn, value);
+            boolean safe = value instanceof SafeValue && ((SafeValue) value).safe;
+            return wrap(result, safe);
+        }
+
+        @Override
+        public BasicValue binaryOperation(AbstractInsnNode insn, BasicValue value1, BasicValue value2) throws AnalyzerException {
+            BasicValue result = (BasicValue) super.binaryOperation(insn, value1, value2);
+            boolean safe = (value1 instanceof SafeValue && ((SafeValue) value1).safe)
+                    || (value2 instanceof SafeValue && ((SafeValue) value2).safe);
+            return wrap(result, safe);
+        }
+
+        @Override
+        public BasicValue ternaryOperation(AbstractInsnNode insn, BasicValue value1, BasicValue value2, BasicValue value3)
+                throws AnalyzerException {
+            BasicValue result = (BasicValue) super.ternaryOperation(insn, value1, value2, value3);
+            boolean safe = (value1 instanceof SafeValue && ((SafeValue) value1).safe)
+                    || (value2 instanceof SafeValue && ((SafeValue) value2).safe)
+                    || (value3 instanceof SafeValue && ((SafeValue) value3).safe);
+            return wrap(result, safe);
+        }
+
+        @Override
+        public BasicValue naryOperation(AbstractInsnNode insn, List<? extends BasicValue> values) throws AnalyzerException {
+            BasicValue result = (BasicValue) super.naryOperation(insn, values);
+            boolean safe = false;
+            if (insn instanceof MethodInsnNode) {
+                MethodInsnNode call = (MethodInsnNode) insn;
+                if (call.getOpcode() != Opcodes.INVOKESTATIC && !values.isEmpty()) {
+                    BasicValue receiver = values.get(0);
+                    safe = receiver instanceof SafeValue && ((SafeValue) receiver).safe;
+                }
+            }
+            return wrap(result, safe);
+        }
+
+        @Override
+        public BasicValue merge(BasicValue value1, BasicValue value2) {
+            BasicValue result = (BasicValue) super.merge(value1, value2);
+            boolean safe = (value1 instanceof SafeValue && ((SafeValue) value1).safe)
+                    || (value2 instanceof SafeValue && ((SafeValue) value2).safe);
+            return wrap(result, safe);
+        }
     }
 
     private boolean alreadyInstrumented(MethodNode method) {
@@ -1813,6 +2338,24 @@ public class KolobokTransformer {
         return false;
     }
 
+    private boolean hasAnnotation(FieldNode field, String desc) {
+        if (field.visibleAnnotations != null) {
+            for (AnnotationNode annotation : field.visibleAnnotations) {
+                if (desc.equals(annotation.desc)) {
+                    return true;
+                }
+            }
+        }
+        if (field.invisibleAnnotations != null) {
+            for (AnnotationNode annotation : field.invisibleAnnotations) {
+                if (desc.equals(annotation.desc)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private AnnotationNode findAnnotation(MethodNode method, String desc) {
         AnnotationNode annotation = findAnnotation(method.visibleAnnotations, desc);
         if (annotation != null) {
@@ -1917,6 +2460,13 @@ public class KolobokTransformer {
             }
         }
         return false;
+    }
+
+    private boolean hasAnnotation(List<AnnotationNode>[] annotations, int index, String desc) {
+        if (annotations == null || index < 0 || index >= annotations.length) {
+            return false;
+        }
+        return hasAnnotation(annotations[index], desc);
     }
 
     private AnnotationNode findAnnotation(List<AnnotationNode> annotations, String desc) {

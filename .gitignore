@@ -30,3 +30,4 @@ token.xml
 # Local run scripts
 **/run-java*.sh
 **/compile*.sh
+AGENTS.md
