@@ -48,7 +48,7 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.release>11</maven.compiler.release>
     <asm.version>9.8</asm.version>
-    <assertj.version>3.25.3</assertj.version>
+    <assertj.version>3.27.7</assertj.version>
     <junit.version>4.13.2</junit.version>
     <maven.plugin.annotations.version>3.11.0</maven.plugin.annotations.version>
     <maven.plugin.plugin.version>3.11.0</maven.plugin.plugin.version>
